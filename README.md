@@ -202,7 +202,7 @@ hevy-mcp-rust/
 │   └── tools.rs            # HevyTools — all 20 MCP tool implementations
 ├── tests/
 │   └── integration_test.rs # Full end-to-end tests (spawns the binary as a child process)
-└── ARCHITECTURE.md         # In-depth architectural notes
+└── openapi-spec.json       # Cleaned Hevy API specification
 ```
 
 ### Building

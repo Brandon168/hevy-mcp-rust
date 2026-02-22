@@ -15,6 +15,3 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
-
-# Reference implementation (TypeScript original — local only)
-/reference-ts

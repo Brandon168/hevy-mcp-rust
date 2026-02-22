@@ -21,8 +21,20 @@ pub struct HevyTools {
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct PaginationParams {
     /// Page number (1-indexed)
+    #[schemars(range(min = 1))]
     pub page: u32,
-    /// Number of results per page
+    /// Number of results per page (must be between 1 and 10)
+    #[schemars(range(min = 1, max = 10))]
+    pub page_size: u32,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct TemplatePaginationParams {
+    /// Page number (1-indexed)
+    #[schemars(range(min = 1))]
+    pub page: u32,
+    /// Number of results per page (must be between 1 and 100)
+    #[schemars(range(min = 1, max = 100))]
     pub page_size: u32,
 }
 
@@ -36,7 +48,11 @@ pub struct GetWorkoutParams {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct GetEventsParams {
+    /// Page number (1-indexed)
+    #[schemars(range(min = 1))]
     pub page: u32,
+    /// Number of results per page (must be between 1 and 10)
+    #[schemars(range(min = 1, max = 10))]
     pub page_size: u32,
     /// ISO 8601 date-time; only events after this timestamp are returned
     pub since: String,
@@ -228,7 +244,7 @@ impl HevyTools {
 
     #[tool(
         name = "get-workouts",
-        description = "Get a paginated list of workouts. Returns workout details including title, description, start/end times, and exercises performed. Results are ordered from newest to oldest."
+        description = "Get a paginated list of workouts. Returns workout details including title, description, start/end times, and exercises performed. Results are ordered from newest to oldest (most recent first). page_size must be between 1 and 10. To fetch recent workouts, use page=1 and a small page_size (e.g. 5), then filter the results by date."
     )]
     async fn get_workouts(
         &self,
@@ -278,7 +294,7 @@ impl HevyTools {
 
     #[tool(
         name = "get-workout-events",
-        description = "Retrieve a paged list of workout events (updates or deletes) since a given date. Events are ordered from newest to oldest. The intention is to allow clients to keep their local cache of workouts up to date without having to fetch the entire list of workouts."
+        description = "Retrieve a paged list of workout events (updates or deletes) since a given date. Events are ordered from newest to oldest. page_size must be between 1 and 10. The intention is to allow clients to keep their local cache of workouts up to date without having to fetch the entire list of workouts."
     )]
     async fn get_workout_events(
         &self,
@@ -332,7 +348,7 @@ impl HevyTools {
 
     #[tool(
         name = "get-routines",
-        description = "Get a paginated list of your workout routines, including custom and default routines. Useful for browsing or searching your available routines."
+        description = "Get a paginated list of your workout routines, including custom and default routines. page_size must be between 1 and 10. Useful for browsing or searching your available routines."
     )]
     async fn get_routines(
         &self,
@@ -412,7 +428,7 @@ impl HevyTools {
 
     #[tool(
         name = "get-routine-folders",
-        description = "Get a paginated list of your routine folders, including both default and custom folders. Useful for organizing and browsing your workout routines."
+        description = "Get a paginated list of your routine folders, including both default and custom folders. page_size must be between 1 and 10. Useful for organizing and browsing your workout routines."
     )]
     async fn get_folders(
         &self,
@@ -464,11 +480,11 @@ impl HevyTools {
 
     #[tool(
         name = "get-exercise-templates",
-        description = "Get a paginated list of exercise templates (default and custom) with details like name, category, equipment, and muscle groups. Useful for browsing or searching available exercises."
+        description = "Get a paginated list of exercise templates (default and custom) with details like name, category, equipment, and muscle groups. page_size must be between 1 and 100. Useful for browsing or searching available exercises."
     )]
     async fn get_templates(
         &self,
-        params: Parameters<PaginationParams>,
+        params: Parameters<TemplatePaginationParams>,
     ) -> Result<Json<TemplateListSchema>, String> {
         let res = self
             .client
@@ -747,6 +763,25 @@ mod tests {
         assert!(
             geh["properties"]["exercise_template_id"].is_object(),
             "get-exercise-history schema missing `exercise_template_id` property: {geh}"
+        );
+
+        // ── page_size must carry maximum:10 so models don't guess out-of-range values ─
+        // This is the constraint that prevents the "400: pageSize must be <= 10" error.
+        let gw_paginated = &schema_map["get-workouts"];
+        let page_size_schema = &gw_paginated["properties"]["page_size"];
+        assert_eq!(
+            page_size_schema["maximum"],
+            serde_json::json!(10),
+            "get-workouts.page_size must have maximum:10 in its JSON Schema to guide models; got: {page_size_schema}"
+        );
+
+        // ── get-exercise-templates allows up to 100 items ───────────────────
+        let get_templates = &schema_map["get-exercise-templates"];
+        let template_page_size = &get_templates["properties"]["page_size"];
+        assert_eq!(
+            template_page_size["maximum"],
+            serde_json::json!(100),
+            "get-exercise-templates.page_size should allow maximum:100; got: {template_page_size}"
         );
 
         println!("All tool schema checks passed!");
