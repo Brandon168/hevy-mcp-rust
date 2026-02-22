@@ -1,0 +1,46 @@
+[package]
+name = "hevy-mcp"
+version = "0.1.0"
+edition = "2021"
+description = "A Model Context Protocol (MCP) server for the Hevy fitness tracking API"
+license = "MIT"
+readme = "README.md"
+keywords = ["mcp", "hevy", "fitness", "ai", "llm"]
+categories = ["network-programming", "api-bindings"]
+
+[dependencies]
+# MCP Protocol Layer
+rmcp = { version = "0.16.0", features = [
+    "server",
+    "client",
+    "schemars",
+    "transport-io",
+    "transport-child-process",
+    "transport-streamable-http-server",
+] }
+
+# Async runtime & Web Server
+tokio = { version = "1.43.0", features = ["full"] }
+axum = "0.8.1"
+
+# HTTP Client
+reqwest = { version = "0.12.12", features = ["json"] }
+
+# Data Serialization & Tool Schemas
+serde = { version = "1.0.217", features = ["derive"] }
+serde_json = "1.0.138"
+
+# Logging & Observability
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+
+# Error Handling
+anyhow = "1.0.95"
+thiserror = "2.0.11"
+schemars = "1.2.1"
+
+# CLI arg parsing
+clap = { version = "4", features = ["derive", "env"] }
+
+# .env file loading
+dotenvy = "0.15"

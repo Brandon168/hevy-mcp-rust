@@ -1,0 +1,20 @@
+# Rust build artifacts
+/target
+
+# Environment / secrets — never commit
+.env
+.env.local
+.env.*.local
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Reference implementation (TypeScript original — local only)
+/reference-ts
