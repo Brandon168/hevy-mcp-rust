@@ -54,8 +54,11 @@ HEVY_API_KEY=sk_live_... cargo run --release
 
 ## Prerequisites
 
-- [Rust](https://rustup.rs/) 1.75 or higher (`rustup update stable`)
-- A Hevy API key ([Hevy PRO subscription required](https://www.hevyapp.com/))
+- **Hevy PRO Subscription** — Required to access the Hevy API.
+- **Hevy API Key** — [Generate an API key](https://api.hevyapp.com/docs/) in
+  your Hevy account.
+- **Rust 1.75+** — Only required if **building from source** (pre-compiled
+  binaries have no dependencies).
 
 > **Platform support:** Runs on macOS, Linux, and Windows. The binary is fully
 > cross-platform — `cargo build --release` produces a native executable on each
