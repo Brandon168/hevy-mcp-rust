@@ -27,20 +27,25 @@ version— with no runtime to install.
 
 ## Quick Start
 
-### Run via Cargo (from source)
+### 1. Install via Binary (Recommended)
+
+If you are on macOS or Linux, you can install the latest pre-compiled binary
+with one command:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/hevy-mcp-rust.git
-cd hevy-mcp-rust
-HEVY_API_KEY=sk_live_... cargo run --release
+curl -fsSL https://raw.githubusercontent.com/Brandon168/hevy-mcp-rust/master/install.sh | sh
 ```
 
-### Build a release binary
+Alternatively, download the latest binary for your platform from the
+[Releases page](https://github.com/Brandon168/hevy-mcp-rust/releases).
+
+### 2. Run via Cargo (from source)
 
 ```bash
-cargo build --release
-# Binary is at ./target/release/hevy-mcp
-HEVY_API_KEY=sk_live_... ./target/release/hevy-mcp
+git clone https://github.com/Brandon168/hevy-mcp-rust.git
+cd hevy-mcp-rust
+# Provide API key and run
+HEVY_API_KEY=sk_live_... cargo run --release
 ```
 
 ## Prerequisites
