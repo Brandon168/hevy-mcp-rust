@@ -10,6 +10,8 @@ use std::sync::Arc;
 use tools::HevyTools;
 use tracing::info;
 
+
+
 /// CLI arguments — supports stdio and streamable-http transports
 #[derive(Parser)]
 #[command(name = "hevy-mcp", about = "Hevy MCP Server")]
@@ -37,6 +39,7 @@ async fn main() -> Result<()> {
     // Initialize structured logging to stderr (stdout is used for MCP stdio transport)
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
     info!("Starting Hevy MCP server (transport={})", cli.transport);
@@ -62,15 +65,23 @@ async fn main() -> Result<()> {
                 session::local::LocalSessionManager, StreamableHttpService,
                 StreamableHttpServerConfig,
             };
+            use tower_http::cors::CorsLayer;
 
-            let config = StreamableHttpServerConfig::default();
+            let mut config = StreamableHttpServerConfig::default();
+            config.sse_keep_alive = None;
+            config.sse_retry = None; // Disable priming events (data: \n) that crash strict clients
             let session_manager = Arc::new(LocalSessionManager::default());
             let service =
                 StreamableHttpService::new(move || Ok(tools.clone()), session_manager, config);
-            let app = axum::Router::new().nest_service("/mcp", service);
+
+            let app = axum::Router::new()
+                .route("/", axum::routing::get(|| async { "Hevy MCP Server is running. Use /mcp as the streamable-http endpoint." }))
+                .nest_service("/mcp", service)
+                .layer(CorsLayer::permissive());
+            
             let addr = format!("0.0.0.0:{}", cli.port);
             let listener = tokio::net::TcpListener::bind(&addr).await?;
-            info!(port = cli.port, "Starting streamable HTTP transport");
+            info!(port = cli.port, "Starting streamable HTTP transport with CORS enabled");
             axum::serve(listener, app).await?;
         }
         other => {

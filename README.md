@@ -21,7 +21,7 @@ version— with no runtime to install.
 - **Exercise Templates** — Browse available templates; create custom ones
 - **Exercise History** — Query past sets for any exercise template
 - **Webhook Subscriptions** — Create, view, and delete webhook subscriptions
-- **Dual Transport** — Runs over `stdio` (default) or `streamable-http`
+- **Dual Transport** — Runs over `stdio` (default) or `streamable-http` (SSE)
 - **Zero runtime overhead** — ~10 MB idle RAM (vs. >256 MB for the Node.js
   version); single static binary, no Node/Python runtime required
 
@@ -97,7 +97,9 @@ All flags can also be set via environment variables: `MCP_TRANSPORT`,
 
 ## Integration with AI Clients
 
-### Cursor (`~/.cursor/mcp.json`)
+### Cursor / Claude Desktop (Stdio)
+
+Add to `~/.cursor/mcp.json` or `claude_desktop_config.json`:
 
 ```json
 {
@@ -112,42 +114,22 @@ All flags can also be set via environment variables: `MCP_TRANSPORT`,
 }
 ```
 
-Or, if you prefer to run directly from the repo with `cargo run`:
+### Streamable HTTP (SSE)
 
-```json
-{
-  "mcpServers": {
-    "hevy-mcp": {
-      "command": "cargo",
-      "args": [
-        "run",
-        "--release",
-        "--manifest-path",
-        "/path/to/hevy-mcp-rust/Cargo.toml",
-        "--"
-      ],
-      "env": {
-        "HEVY_API_KEY": "sk_live_your_key_here"
-      }
-    }
-  }
-}
-```
+When using **hevy-mcp** with a client that supports the `streamable-http`
+transport (such as **LobeChat**, **LibreChat**, or **IDE plugins**):
 
-### Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json`)
+1. **Start the server**:
+   ```bash
+   hevy-mcp --transport streamable-http --port 3333
+   ```
+2. **Configure Client**:
+   - **Endpoint URL**: `http://localhost:3333/mcp`
+   - **Type**: `Streamable HTTP` (or `SSE`)
 
-```json
-{
-  "mcpServers": {
-    "hevy-mcp": {
-      "command": "/path/to/hevy-mcp",
-      "env": {
-        "HEVY_API_KEY": "sk_live_your_key_here"
-      }
-    }
-  }
-}
-```
+> **Note:** The server supports a full MCP over SSE implementation. The result
+> of the `initialize` call is streamed via SSE, while subsequent requests use
+> standard HTTP POST to the manifest endpoint.
 
 ## Available MCP Tools
 
@@ -214,106 +196,16 @@ hevy-mcp-rust/
 └── openapi-spec.json       # Cleaned Hevy API specification
 ```
 
-### Building
-
-```bash
-# Development build
-cargo build
-
-# Release build (optimized)
-cargo build --release
-
-# Check for compile errors only (fastest)
-cargo check
-```
-
-### Running Locally
-
-```bash
-# stdio mode (default) — connect from an MCP client
-HEVY_API_KEY=your_key cargo run
-
-# Streamable HTTP mode
-HEVY_API_KEY=your_key cargo run -- --transport streamable-http --port 3000
-
-# With verbose logging
-RUST_LOG=debug HEVY_API_KEY=your_key cargo run
-```
-
 ### Testing
 
 ```bash
-# Run all tests (unit + integration)
-# NOTE: Integration tests spawn the compiled binary and connect to it via MCP.
-# They use a fake "test" API key so no real API calls are made.
-cargo test
-
-# Run only unit tests (fast, no binary spawn)
-cargo test --lib
-
-# Run only integration tests
-cargo test --test integration_test
-
-# Run with output visible
+# Run all tests (unit + integration + streamable)
 cargo test -- --nocapture
 ```
 
-#### About the Integration Tests
-
-`tests/integration_test.rs` contains two integration tests that **build and
-spawn the actual binary**:
-
-1. **`test_full_mcp_client`** — Spawns `hevy-mcp` in stdio mode, connects a real
-   MCP client, and asserts that all 20 tools are returned by `list_tools`.
-2. **`test_streamable_http_startup`** — Spawns `hevy-mcp` in streamable-http
-   mode on a random free port, waits for the TCP port to become reachable, and
-   sends a test HTTP request to `/mcp`.
-
-`src/tools.rs` also contains inline `#[cfg(test)]` unit tests:
-
-1. **`test_tools_list_count`** — Verifies 20 tools are registered without
-   spawning a process.
-2. **`test_tool_schemas`** — Verifies that each tool's JSON Schema has the
-   expected properties and enum constraints (e.g., `create-exercise-template`
-   correctly exposes `exercise_type` as an enum).
-
-### Linting
-
-```bash
-# Run Clippy (Rust linter)
-cargo clippy
-
-# Apply auto-fixable suggestions
-cargo clippy --fix
-```
-
-### Logging
-
-Structured logs are emitted to **stderr** (stdout is reserved for the stdio MCP
-transport). Control verbosity via the `RUST_LOG` environment variable:
-
-```bash
-RUST_LOG=info   # default level
-RUST_LOG=debug  # verbose (shows HTTP requests)
-RUST_LOG=warn   # quiet
-```
-
-## Architecture
-
-Key technology choices:
-
-- **[rmcp](https://github.com/modelcontextprotocol/rust-sdk)** — Official Rust
-  MCP SDK; tools are declared with `#[tool]` / `#[tool_router]` proc macros
-- **[tokio](https://tokio.rs/)** — Async runtime
-- **[axum](https://github.com/tokio-rs/axum)** — HTTP server (streamable-http
-  transport)
-- **[reqwest](https://docs.rs/reqwest)** — Async HTTP client for Hevy API calls
-- **[serde](https://serde.rs/) + [schemars](https://docs.rs/schemars)** — JSON
-  serialization and automatic JSON Schema generation for tool parameters
-- **[tracing](https://docs.rs/tracing)** — Structured, async-aware logging
-- **[clap](https://docs.rs/clap)** — CLI argument parsing
-- **[anyhow](https://docs.rs/anyhow) + [thiserror](https://docs.rs/thiserror)**
-  — Error handling
+The integration test suite verifies the **full streamable HTTP protocol**,
+ensuring that `initialize` handshakes, notifications, and tool listings all work
+correctly over SSE.
 
 ## License
 

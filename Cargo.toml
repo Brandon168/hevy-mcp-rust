@@ -1,6 +1,6 @@
 [package]
 name = "hevy-mcp"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "A Model Context Protocol (MCP) server for the Hevy fitness tracking API"
 license = "MIT"
@@ -17,14 +17,17 @@ rmcp = { version = "0.16.0", features = [
     "transport-io",
     "transport-child-process",
     "transport-streamable-http-server",
+    "transport-streamable-http-client",
 ] }
 
 # Async runtime & Web Server
 tokio = { version = "1.43.0", features = ["full"] }
 axum = "0.8.1"
+futures = "0.3"
+bytes = "1.10"
 
 # HTTP Client
-reqwest = { version = "0.12.12", features = ["json"] }
+reqwest = { version = "0.12.12", features = ["json", "stream"] }
 
 # Data Serialization & Tool Schemas
 serde = { version = "1.0.217", features = ["derive"] }
@@ -44,3 +47,4 @@ clap = { version = "4", features = ["derive", "env"] }
 
 # .env file loading
 dotenvy = "0.15"
+tower-http = { version = "0.6.8", features = ["cors"] }
