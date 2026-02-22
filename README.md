@@ -59,7 +59,9 @@ HEVY_API_KEY=sk_live_... cargo run --release
 
 > **Platform support:** Runs on macOS, Linux, and Windows. The binary is fully
 > cross-platform — `cargo build --release` produces a native executable on each
-> platform (`hevy-mcp.exe` on Windows).
+> platform (`hevy-mcp.exe` on Windows). Note: macOS and Linux are tested and
+> work well. Windows and WSL should work but are currently untested; feedback is
+> welcome!
 
 ## Installation & Configuration
 
