@@ -1,4 +1,6 @@
-use rmcp::{ClientHandler, ServiceExt, model::ClientInfo, transport::child_process::TokioChildProcess};
+use rmcp::{
+    model::ClientInfo, transport::child_process::TokioChildProcess, ClientHandler, ServiceExt,
+};
 use tokio::process::Command;
 
 #[derive(Default, Clone)]
@@ -22,7 +24,7 @@ async fn main() -> anyhow::Result<()> {
 
     let client_handler = DummyClientHandler::default();
     let client = client_handler.serve(transport).await?;
-    
+
     let tools = client.list_tools(None).await?;
     println!("Tools returned from client: {}", tools.tools.len());
 

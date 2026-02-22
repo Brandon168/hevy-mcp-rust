@@ -1,16 +1,10 @@
-mod client;
-mod tools;
-mod types;
-
 use anyhow::Result;
 use clap::Parser;
-use client::HevyClient;
+use hevy_mcp::client::HevyClient;
+use hevy_mcp::tools::HevyTools;
 use rmcp::service::ServiceExt;
 use std::sync::Arc;
-use tools::HevyTools;
 use tracing::info;
-
-
 
 /// CLI arguments — supports stdio and streamable-http transports
 #[derive(Parser)]
@@ -27,6 +21,10 @@ struct Cli {
     /// Hevy API key
     #[arg(long, env = "HEVY_API_KEY")]
     hevy_api_key: String,
+
+    /// Optional Hevy base URL (used for mock testing)
+    #[arg(long, env = "HEVY_BASE_URL", default_value = "https://api.hevyapp.com")]
+    hevy_base_url: String,
 }
 
 #[tokio::main]
@@ -44,7 +42,10 @@ async fn main() -> Result<()> {
 
     info!("Starting Hevy MCP server (transport={})", cli.transport);
 
-    let client = Arc::new(HevyClient::new(cli.hevy_api_key)?);
+    let client = Arc::new(HevyClient::with_base_url(
+        cli.hevy_api_key,
+        cli.hevy_base_url,
+    )?);
     let tools = HevyTools::new(client);
 
     match cli.transport.as_str() {
@@ -62,32 +63,40 @@ async fn main() -> Result<()> {
         }
         "streamable-http" => {
             use rmcp::transport::streamable_http_server::{
-                session::local::LocalSessionManager, StreamableHttpService,
-                StreamableHttpServerConfig,
+                session::local::LocalSessionManager, StreamableHttpServerConfig,
+                StreamableHttpService,
             };
             use tower_http::cors::CorsLayer;
 
-            let mut config = StreamableHttpServerConfig::default();
-            config.sse_keep_alive = None;
-            config.sse_retry = None; // Disable priming events (data: \n) that crash strict clients
+            let config = StreamableHttpServerConfig {
+                sse_keep_alive: None,
+                sse_retry: None, // Disable priming events (data: \n) that crash strict clients
+                ..Default::default()
+            };
             let session_manager = Arc::new(LocalSessionManager::default());
             let service =
                 StreamableHttpService::new(move || Ok(tools.clone()), session_manager, config);
 
             let app = axum::Router::new()
-                .route("/", axum::routing::get(|| async { "Hevy MCP Server is running. Use /mcp as the streamable-http endpoint." }))
+                .route(
+                    "/",
+                    axum::routing::get(|| async {
+                        "Hevy MCP Server is running. Use /mcp as the streamable-http endpoint."
+                    }),
+                )
                 .nest_service("/mcp", service)
                 .layer(CorsLayer::permissive());
-            
+
             let addr = format!("0.0.0.0:{}", cli.port);
             let listener = tokio::net::TcpListener::bind(&addr).await?;
-            info!(port = cli.port, "Starting streamable HTTP transport with CORS enabled");
+            info!(
+                port = cli.port,
+                "Starting streamable HTTP transport with CORS enabled"
+            );
             axum::serve(listener, app).await?;
         }
         other => {
-            anyhow::bail!(
-                "Unknown transport: {other}. Use 'stdio' or 'streamable-http'."
-            );
+            anyhow::bail!("Unknown transport: {other}. Use 'stdio' or 'streamable-http'.");
         }
     }
 

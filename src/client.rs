@@ -1,4 +1,3 @@
-
 use crate::types::*;
 use reqwest::{header, Client, StatusCode};
 use thiserror::Error;
@@ -30,6 +29,10 @@ pub struct HevyClient {
 
 impl HevyClient {
     pub fn new(api_key: String) -> Result<Self, anyhow::Error> {
+        Self::with_base_url(api_key, "https://api.hevyapp.com".to_string())
+    }
+
+    pub fn with_base_url(api_key: String, base_url: String) -> Result<Self, anyhow::Error> {
         let mut headers = header::HeaderMap::new();
         let mut api_key_val = header::HeaderValue::from_str(&api_key)?;
         api_key_val.set_sensitive(true);
@@ -44,7 +47,7 @@ impl HevyClient {
         Ok(Self {
             api_key,
             http_client,
-            base_url: "https://api.hevyapp.com".to_string(),
+            base_url,
         })
     }
 

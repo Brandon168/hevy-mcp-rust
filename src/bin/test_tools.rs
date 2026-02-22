@@ -1,4 +1,4 @@
-use rmcp::{ServerHandler, handler::server::tool::ToolRouter, tool, tool_handler, tool_router};
+use rmcp::{handler::server::tool::ToolRouter, tool, tool_handler, tool_router, ServerHandler};
 
 #[derive(Clone)]
 pub struct TestServer {
@@ -8,11 +8,15 @@ pub struct TestServer {
 #[tool_router]
 impl TestServer {
     pub fn new() -> Self {
-        Self { tool_router: Self::tool_router() }
+        Self {
+            tool_router: Self::tool_router(),
+        }
     }
 
     #[tool(name = "test-tool")]
-    async fn test_tool(&self) -> Result<String, String> { Ok("hello".to_string()) }
+    async fn test_tool(&self) -> Result<String, String> {
+        Ok("hello".to_string())
+    }
 }
 
 impl Default for TestServer {

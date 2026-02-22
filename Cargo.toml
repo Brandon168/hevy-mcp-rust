@@ -1,6 +1,6 @@
 [package]
 name = "hevy-mcp"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "A Model Context Protocol (MCP) server for the Hevy fitness tracking API"
 license = "MIT"
@@ -48,3 +48,6 @@ clap = { version = "4", features = ["derive", "env"] }
 # .env file loading
 dotenvy = "0.15"
 tower-http = { version = "0.6.8", features = ["cors"] }
+
+[dev-dependencies]
+wiremock = "0.6.5"

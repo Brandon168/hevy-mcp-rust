@@ -1,5 +1,7 @@
+use rmcp::{
+    model::ClientInfo, transport::child_process::TokioChildProcess, ClientHandler, ServiceExt,
+};
 use std::time::Duration;
-use rmcp::{ClientHandler, ServiceExt, model::ClientInfo, transport::child_process::TokioChildProcess};
 use tokio::process::Command;
 
 #[derive(Default, Clone)]
@@ -13,9 +15,26 @@ impl ClientHandler for DummyClientHandler {
 
 #[tokio::test]
 async fn test_full_mcp_client() {
-    let _ = tracing_subscriber::fmt().with_env_filter("debug").try_init();
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("debug")
+        .try_init();
+
+    // Start wiremock
+    use wiremock::{
+        matchers::{method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/v1/workouts/count"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "count": 12 })))
+        .mount(&mock_server)
+        .await;
+
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_hevy-mcp"));
     cmd.env("HEVY_API_KEY", "test");
+    cmd.env("HEVY_BASE_URL", mock_server.uri());
     cmd.env("RUST_BACKTRACE", "1");
 
     let transport = TokioChildProcess::builder(cmd)
@@ -28,9 +47,10 @@ async fn test_full_mcp_client() {
 
     let client_handler = DummyClientHandler::default();
     let client = client_handler.serve(transport).await.unwrap();
-    
+
     tokio::time::sleep(Duration::from_millis(500)).await;
 
+    // Verify tools/list
     match tokio::time::timeout(Duration::from_secs(5), client.list_tools(None)).await {
         Ok(Ok(tools)) => {
             println!("Tools returned: {}", tools.tools.len());
@@ -38,6 +58,26 @@ async fn test_full_mcp_client() {
         }
         Ok(Err(e)) => panic!("Error listing tools: {:?}", e),
         Err(_) => panic!("Timeout listing tools"),
+    }
+
+    // Verify tools/call (integration! End-to-end to Hevy API mock)
+    let call_params = rmcp::model::CallToolRequestParams {
+        name: std::borrow::Cow::Borrowed("get-workout-count"),
+        arguments: Some(serde_json::Map::new()),
+        meta: None,
+        task: None,
+    };
+    match tokio::time::timeout(Duration::from_secs(5), client.call_tool(call_params)).await {
+        Ok(Ok(res)) => {
+            assert_eq!(res.content.len(), 1);
+            let content_str = serde_json::to_string(&res.content[0]).unwrap();
+            println!("Tool call content: {}", content_str);
+            assert!(
+                content_str.contains(r#"\"count\":12"#) || content_str.contains(r#"\"count\": 12"#)
+            );
+        }
+        Ok(Err(e)) => panic!("Error calling tool: {:?}", e),
+        Err(_) => panic!("Timeout calling tool"),
     }
 
     client.cancel().await.unwrap();
@@ -54,13 +94,15 @@ async fn test_streamable_http_startup() {
 
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_hevy-mcp"));
     cmd.env("HEVY_API_KEY", "test")
-       .env("MCP_TRANSPORT", "streamable-http")
-       .env("MCP_PORT", port.to_string())
-       .kill_on_drop(true)
-       .stdout(std::process::Stdio::null())
-       .stderr(std::process::Stdio::inherit());
+        .env("MCP_TRANSPORT", "streamable-http")
+        .env("MCP_PORT", port.to_string())
+        .kill_on_drop(true)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::inherit());
 
-    let mut child = cmd.spawn().expect("failed to spawn hevy-mcp in streamable-http mode");
+    let mut child = cmd
+        .spawn()
+        .expect("failed to spawn hevy-mcp in streamable-http mode");
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     let reachable = loop {
@@ -75,7 +117,10 @@ async fn test_streamable_http_startup() {
 
     if !reachable {
         let _ = child.kill().await;
-        panic!("streamable-http server did not become reachable within 5 s on port {}", port);
+        panic!(
+            "streamable-http server did not become reachable within 5 s on port {}",
+            port
+        );
     }
 
     let url = format!("http://127.0.0.1:{}/mcp", port);
@@ -97,8 +142,8 @@ async fn test_streamable_http_startup() {
 
 #[tokio::test]
 async fn test_streamable_mcp_full_listing() {
-    use futures::StreamExt;
     use bytes::Bytes;
+    use futures::StreamExt;
 
     let port = {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind for free port");
@@ -106,20 +151,37 @@ async fn test_streamable_mcp_full_listing() {
     };
 
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_hevy-mcp"));
+
+    use wiremock::{
+        matchers::{method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/v1/workouts/count"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "count": 12 })))
+        .mount(&mock_server)
+        .await;
+
     cmd.env("HEVY_API_KEY", "test")
-       .env("MCP_TRANSPORT", "streamable-http")
-       .env("MCP_PORT", port.to_string())
-       .env("RUST_LOG", "debug")
-       .kill_on_drop(true)
-       .stdout(std::process::Stdio::null())
-       .stderr(std::process::Stdio::inherit());
+        .env("HEVY_BASE_URL", mock_server.uri())
+        .env("MCP_TRANSPORT", "streamable-http")
+        .env("MCP_PORT", port.to_string())
+        .env("RUST_LOG", "debug")
+        .kill_on_drop(true)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::inherit());
 
     let mut child = cmd.spawn().expect("failed to spawn hevy-mcp");
 
     // Wait for server
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     while tokio::time::Instant::now() < deadline {
-        if tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port)).await.is_ok() {
+        if tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port))
+            .await
+            .is_ok()
+        {
             break;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -127,7 +189,7 @@ async fn test_streamable_mcp_full_listing() {
 
     let manifest_url = format!("http://127.0.0.1:{}/mcp/manifest", port);
     let http = reqwest::Client::new();
-    
+
     // 1. Initialize
     let init_payload = serde_json::json!({
         "jsonrpc": "2.0",
@@ -140,7 +202,8 @@ async fn test_streamable_mcp_full_listing() {
         }
     });
 
-    let resp = http.post(&manifest_url)
+    let resp = http
+        .post(&manifest_url)
         .header("Accept", "application/json, text/event-stream")
         .json(&init_payload)
         .send()
@@ -148,7 +211,13 @@ async fn test_streamable_mcp_full_listing() {
         .expect("Initialize failed");
 
     assert!(resp.status().is_success());
-    let session_id = resp.headers().get("mcp-session-id").expect("missing session id").to_str().unwrap().to_string();
+    let session_id = resp
+        .headers()
+        .get("mcp-session-id")
+        .expect("missing session id")
+        .to_str()
+        .unwrap()
+        .to_string();
 
     let mut stream = resp.bytes_stream();
     println!("--- Reading initial SSE lines ---");
@@ -162,14 +231,15 @@ async fn test_streamable_mcp_full_listing() {
         "jsonrpc": "2.0",
         "method": "notifications/initialized"
     });
-    let notify_resp = http.post(&manifest_url)
+    let notify_resp = http
+        .post(&manifest_url)
         .header("mcp-session-id", &session_id)
         .header("Accept", "application/json, text/event-stream")
         .json(&notify_payload)
         .send()
         .await
         .expect("Notification failed");
-    
+
     if !notify_resp.status().is_success() {
         let status = notify_resp.status();
         let body = notify_resp.text().await.unwrap_or_default();
@@ -183,46 +253,115 @@ async fn test_streamable_mcp_full_listing() {
         "method": "tools/list",
         "params": {}
     });
-    let list_resp = http.post(&manifest_url)
+    let list_resp = http
+        .post(&manifest_url)
         .header("mcp-session-id", &session_id)
         .header("Accept", "application/json, text/event-stream")
         .json(&list_payload)
         .send()
         .await
         .expect("List tools failed");
-    
+
     let list_body = list_resp.text().await.unwrap_or_default();
     println!("List tools body: {}", list_body);
-    
+
     if list_body.contains("\"id\":2") && list_body.contains("get-workouts") {
         println!("SUCCESS: Tool list found in POST body!");
-        let _ = child.kill().await;
-        return;
-    }
+    } else {
+        // Parse SSE stream for tool list
+        let mut buffer = String::new();
+        let mut found = false;
+        while let Some(chunk_result) = stream.next().await {
+            let chunk: Bytes = chunk_result.expect("stream error");
+            let chunk_str = String::from_utf8_lossy(&chunk);
+            buffer.push_str(&chunk_str);
 
-    // 4. Parse SSE stream for tool list (should not be needed based on spec but let's check)
-    let mut buffer = String::new();
-    while let Some(chunk_result) = stream.next().await {
-        let chunk: Bytes = chunk_result.expect("stream error");
-        let chunk_str = String::from_utf8_lossy(&chunk);
-        buffer.push_str(&chunk_str);
-
-        while let Some(pos) = buffer.find("\n") {
-            let line = buffer.drain(..pos + 1).collect::<String>();
-            if line.starts_with("data: ") {
-                let data = line["data: ".len()..].trim();
-                if !data.is_empty() {
-                    if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(data) {
-                        if json_val.get("id") == Some(&serde_json::json!(2)) {
-                            println!("FOUND TOOL LIST RESPONSE IN SSE!");
-                            let _ = child.kill().await;
-                            return;
+            while let Some(pos) = buffer.find("\n") {
+                let line = buffer.drain(..pos + 1).collect::<String>();
+                if line.starts_with("data: ") {
+                    let data = line["data: ".len()..].trim();
+                    if !data.is_empty() {
+                        if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(data) {
+                            if json_val.get("id") == Some(&serde_json::json!(2)) {
+                                println!("FOUND TOOL LIST RESPONSE IN SSE!");
+                                found = true;
+                                break;
+                            }
                         }
                     }
                 }
             }
+            if found {
+                break;
+            }
+        }
+        if !found {
+            panic!("Tool list response not found anywhere");
         }
     }
 
-    panic!("Tool list response not found anywhere");
+    // 4. Tools Call
+    let call_payload = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "get-workout-count",
+            "arguments": {}
+        }
+    });
+
+    let call_resp = http
+        .post(&manifest_url)
+        .header("mcp-session-id", &session_id)
+        .header("Accept", "application/json, text/event-stream")
+        .json(&call_payload)
+        .send()
+        .await
+        .expect("Call tool failed");
+
+    let call_body = call_resp.text().await.unwrap_or_default();
+    println!("Call tool body: {}", call_body);
+
+    if call_body.contains("\"id\":3") && call_body.contains("\"count\":12") {
+        println!("SUCCESS: Tool call found in POST body!");
+    } else {
+        // Parse SSE stream for tool call
+        let mut buffer = String::new();
+        let mut found = false;
+        while let Some(chunk_result) = stream.next().await {
+            let chunk: Bytes = chunk_result.expect("stream error");
+            let chunk_str = String::from_utf8_lossy(&chunk);
+            buffer.push_str(&chunk_str);
+
+            while let Some(pos) = buffer.find("\n") {
+                let line = buffer.drain(..pos + 1).collect::<String>();
+                if line.starts_with("data: ") {
+                    let data = line["data: ".len()..].trim();
+                    if !data.is_empty() {
+                        if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(data) {
+                            if json_val.get("id") == Some(&serde_json::json!(3)) {
+                                println!("FOUND TOOL CALL RESPONSE IN SSE!");
+                                let content_str = serde_json::to_string(&json_val).unwrap();
+                                assert!(
+                                    content_str.contains(r#"\"count\":12"#)
+                                        || content_str.contains(r#"\"count\": 12"#)
+                                );
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if found {
+                break;
+            }
+        }
+        if !found {
+            panic!("Tool call response not found anywhere");
+        }
+    }
+
+    let _ = child.kill().await;
 }

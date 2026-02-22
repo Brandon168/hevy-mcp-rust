@@ -1,4 +1,3 @@
-
 use crate::client::HevyClient;
 use crate::types::*;
 use rmcp::{
@@ -576,8 +575,7 @@ impl HevyTools {
             .get_webhook_subscription()
             .await
             .map_err(|e| e.to_string())?;
-        let typed: WebhookResponse =
-            serde_json::from_value(res).map_err(|e| e.to_string())?;
+        let typed: WebhookResponse = serde_json::from_value(res).map_err(|e| e.to_string())?;
         Ok(Json(typed))
     }
 
@@ -595,8 +593,7 @@ impl HevyTools {
             .create_webhook_subscription(payload)
             .await
             .map_err(|e| e.to_string())?;
-        let typed: WebhookResponse =
-            serde_json::from_value(res).map_err(|e| e.to_string())?;
+        let typed: WebhookResponse = serde_json::from_value(res).map_err(|e| e.to_string())?;
         Ok(Json(typed))
     }
 
@@ -667,8 +664,7 @@ mod tests {
         let schema_map: std::collections::HashMap<String, serde_json::Value> = list
             .iter()
             .map(|t| {
-                let schema: serde_json::Value =
-                    serde_json::to_value(&t.input_schema).unwrap();
+                let schema: serde_json::Value = serde_json::to_value(&t.input_schema).unwrap();
                 (t.name.to_string(), schema)
             })
             .collect();
@@ -697,10 +693,7 @@ mod tests {
             "delete-webhook-subscription",
         ];
         for name in &expected_names {
-            assert!(
-                schema_map.contains_key(*name),
-                "Missing tool: {name}"
-            );
+            assert!(schema_map.contains_key(*name), "Missing tool: {name}");
         }
 
         // ── get-workout must have an `id` property ───────────────────────────
@@ -787,4 +780,3 @@ mod tests {
         println!("All tool schema checks passed!");
     }
 }
-
