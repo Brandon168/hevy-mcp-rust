@@ -29,15 +29,19 @@ version— with no runtime to install.
 
 ### 1. Install via Binary (Recommended)
 
-If you are on macOS or Linux, you can install the latest pre-compiled binary
-with one command:
+**macOS / Linux:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Brandon168/hevy-mcp-rust/master/install.sh | sh
 ```
 
-Alternatively, download the latest binary for your platform from the
-[Releases page](https://github.com/Brandon168/hevy-mcp-rust/releases).
+**Windows (PowerShell):** Download the `hevy-mcp-windows-x86_64.zip` from the
+[Releases page](https://github.com/Brandon168/hevy-mcp-rust/releases), extract
+it, and place the `hevy-mcp.exe` in your PATH, or run it directly:
+
+```powershell
+.\hevy-mcp.exe --help
+```
 
 ### 2. Run via Cargo (from source)
 
