@@ -189,25 +189,37 @@ hevy-mcp-rust/
 ├── Cargo.toml              # Package manifest and dependencies
 ├── .env                    # Local API key (not committed)
 ├── src/
-│   ├── main.rs             # CLI parsing, transport selection, server startup
-│   ├── client.rs           # HevyClient — typed reqwest wrapper for the Hevy REST API
-│   ├── types.rs            # Serde + JsonSchema typed structs (Workout, Routine, etc.)
+│   ├── main.rs             # CLI entry point (thin wrapper)
+│   ├── lib.rs              # Library root (exports client, tools, types)
+│   ├── client.rs           # HevyClient — typed REST API wrapper
+│   ├── types.rs            # Serde + JsonSchema typed structs
 │   └── tools.rs            # HevyTools — all 20 MCP tool implementations
 ├── tests/
-│   └── integration_test.rs # Full end-to-end tests (spawns the binary as a child process)
+│   ├── integration_test.rs # Full E2E tests (stdio & streamable-http)
+│   ├── client_test.rs      # Unit tests for HevyClient using wiremock
+│   └── deserialize_test.rs # Verification of API response parsing
 └── openapi-spec.json       # Cleaned Hevy API specification
 ```
 
-### Testing
+### Testing & Verification
+
+We maintain a high bar for reliability. Before submitting changes, always run:
 
 ```bash
-# Run all tests (unit + integration + streamable)
-cargo test -- --nocapture
+cargo test
 ```
 
-The integration test suite verifies the **full streamable HTTP protocol**,
-ensuring that `initialize` handshakes, notifications, and tool listings all work
-correctly over SSE.
+- **Mock Testing**: We use `wiremock` in `client_test.rs` to verify HTTP
+  interactions without hitting the live API.
+- **Integration Handshakes**: `integration_test.rs` spawns the binary to verify
+  the full MCP lifecycle over both Stdio and SSE.
+- **Schema Validation**: Unit tests in `tools.rs` ensure JSON Schemas remain
+  compatible with the reference implementation.
+
+> **AI Developer Note**: When adding new tools or changing types, ensure you
+> update the corresponding mock in `client_test.rs` and verify deserialization
+> in `deserialize_test.rs`. Use `HEVY_BASE_URL` to point the client to your mock
+> server.
 
 ## License
 

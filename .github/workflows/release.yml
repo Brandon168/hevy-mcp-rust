@@ -45,6 +45,11 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.platform.target }}
 
+      - name: Run Tests
+        # Only run tests on linux to save time and because mock server behavior is consistent
+        if: matrix.platform.os == 'ubuntu-latest'
+        run: cargo test --target ${{ matrix.platform.target }}
+
       - name: Package (Unix)
         if: matrix.platform.os != 'windows-latest'
         run: |

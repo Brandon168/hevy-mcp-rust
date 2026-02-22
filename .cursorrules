@@ -1,0 +1,35 @@
+# Hevy-MCP-Rust Steering Rules
+
+You are an expert Rust developer working on the `hevy-mcp` project.
+
+## Project Context
+- **Architecture**: A library-first approach. `src/lib.rs` contains the core logic (`client`, `tools`, `types`). `src/main.rs` is a thin CLI wrapper.
+- **Transports**: Supports both `stdio` and `streamable-http` (SSE) via the `rmcp` crate.
+- **API**: Interfaces with the Hevy REST API. Uses `reqwest` for HTTP.
+
+## Development Mantras
+1.  **Test-Driven Development**: Always add tests when introducing new tools or modifying types.
+2.  **Mocking Policy**:
+    - Do not hit the live Hevy API in tests.
+    - Use `wiremock` in `tests/client_test.rs` to mock API responses.
+    - Use `HEVY_BASE_URL` env var to point the client to the mock server.
+3.  **Type Safety**:
+    - Prefer typed structs in `types.rs` over `serde_json::Value` where possible.
+    - Ensure `JsonSchema` is derived for all tool parameters to maintain high-quality MCP metadata.
+4.  **Error Handling**:
+    - Use `HevyClientError` for API-related issues.
+    - Ensure errors are babbled up to the MCP layer as clear JSON-RPC errors.
+5.  **Clippy & Formatting**:
+    - Follow standard Rust idioms.
+    - Run `cargo clippy -- -D warnings` and `cargo fmt` before finishing.
+
+## Testing Commands
+- `cargo test`: Runs all unit and integration tests.
+- `cargo test --test integration_test`: Runs specific E2E binary tests.
+
+## Adding a New Tool
+1.  Define the parameter struct in `src/tools.rs` with `JsonSchema`.
+2.  Add the method to `HevyClient` in `src/client.rs`.
+3.  Implement the tool in `HevyTools` within `src/tools.rs` using the `#[tool]` attribute.
+4.  Add a `wiremock` test in `tests/client_test.rs` to verify the request/response.
+5.  (Optional) Add a sample response to `tests/deserialize_test.rs` if the response structure is complex.
