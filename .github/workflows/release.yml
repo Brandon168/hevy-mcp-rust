@@ -16,20 +16,24 @@ jobs:
         platform:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            bin: hevy-mcp
-            name: hevy-mcp-linux-x86_64.tar.gz
+            suffix: linux-x86_64
+            mcp_bin: hevy-mcp
+            cli_bin: hevy-cli
           - os: macos-latest
             target: x86_64-apple-darwin
-            bin: hevy-mcp
-            name: hevy-mcp-macos-x86_64.tar.gz
+            suffix: macos-x86_64
+            mcp_bin: hevy-mcp
+            cli_bin: hevy-cli
           - os: macos-latest
             target: aarch64-apple-darwin
-            bin: hevy-mcp
-            name: hevy-mcp-macos-aarch64.tar.gz
+            suffix: macos-aarch64
+            mcp_bin: hevy-mcp
+            cli_bin: hevy-cli
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            bin: hevy-mcp.exe
-            name: hevy-mcp-windows-x86_64.zip
+            suffix: windows-x86_64
+            mcp_bin: hevy-mcp.exe
+            cli_bin: hevy-cli.exe
 
     runs-on: ${{ matrix.platform.os }}
 
@@ -54,7 +58,8 @@ jobs:
         if: matrix.platform.os != 'windows-latest'
         run: |
           cd target/${{ matrix.platform.target }}/release
-          tar czf ../../../${{ matrix.platform.name }} ${{ matrix.platform.bin }}
+          tar czf ../../../hevy-mcp-${{ matrix.platform.suffix }}.tar.gz ${{ matrix.platform.mcp_bin }}
+          tar czf ../../../hevy-cli-${{ matrix.platform.suffix }}.tar.gz ${{ matrix.platform.cli_bin }}
           cd -
 
       - name: Package (Windows)
@@ -62,14 +67,17 @@ jobs:
         shell: bash
         run: |
           cd target/${{ matrix.platform.target }}/release
-          7z a ../../../${{ matrix.platform.name }} ${{ matrix.platform.bin }}
+          7z a ../../../hevy-mcp-${{ matrix.platform.suffix }}.zip ${{ matrix.platform.mcp_bin }}
+          7z a ../../../hevy-cli-${{ matrix.platform.suffix }}.zip ${{ matrix.platform.cli_bin }}
           cd -
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.platform.name }}
-          path: ${{ matrix.platform.name }}
+          name: release-${{ matrix.platform.suffix }}
+          path: |
+            hevy-mcp-${{ matrix.platform.suffix }}.*
+            hevy-cli-${{ matrix.platform.suffix }}.*
 
   release:
     name: Create Release
