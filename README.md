@@ -1,18 +1,29 @@
-# hevy-mcp (Rust)
+# hevy-mcp / hevy-cli (Rust)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 
-A **Model Context Protocol (MCP) server** written in pure Rust that interfaces
-with the [Hevy fitness tracking app](https://www.hevyapp.com/) and its
-[API](https://api.hevyapp.com/docs/). This server enables AI assistants (Claude,
-Cursor, etc.) to read and manage your workout data, routines, exercise
-templates, and more — all through a single, low-overhead binary.
+Rust tools for the [Hevy fitness tracking app](https://www.hevyapp.com/) and its
+[API](https://api.hevyapp.com/docs/):
 
-This Rust version idles at **~10MB** — a ~25× reduction from the typescript
-version— with no runtime to install.
+- **`hevy-mcp`**: a Model Context Protocol server for MCP-capable clients such
+  as Claude Desktop, Cursor, LobeChat, LibreChat, and IDE plugins.
+- **`hevy-cli`**: a direct command-line client for scripts, shell automation,
+  and agent skills that should run one command and exit.
+
+Both binaries use the same typed Rust Hevy API client and require no Node or
+Python runtime.
 
 > **Requires a Hevy PRO subscription** to access the Hevy API.
+
+## Which Should I Use?
+
+| Use case | Use this | Why |
+| --- | --- | --- |
+| Your AI client supports MCP tools and can keep a tool server configured | `hevy-mcp` | Exposes Hevy operations as MCP tools over stdio or streamable HTTP |
+| You want one-off shell commands, scripts, cron jobs, or CI automation | `hevy-cli` | Runs a single command, prints JSON, and exits |
+| You are packaging an agent skill around Hevy access | `hevy-cli` + `skills/hevy` | Skills can invoke the binary directly without running an MCP server |
+| You want HTTP/SSE access for a hosted or web client | `hevy-mcp --transport streamable-http` | Provides an MCP endpoint at `/mcp` |
 
 ## Features
 
@@ -22,12 +33,13 @@ version— with no runtime to install.
 - **Exercise History** — Query past sets for any exercise template
 - **Webhook Subscriptions** — Create, view, and delete webhook subscriptions
 - **Dual Transport** — Runs over `stdio` (default) or `streamable-http` (SSE)
-- **Zero runtime overhead** — ~10 MB idle RAM (vs. >256 MB for the Node.js
-  version); single static binary, no Node/Python runtime required
+- **Direct CLI** — `hevy-cli` provides JSON-first commands and guarded writes
+  with `--confirm`
+- **Agent Skill** — `skills/hevy` documents how agents should call `hevy-cli`
 
 ## Quick Start
 
-### 1. Install via Binary (Recommended)
+### Install `hevy-mcp` via Binary
 
 **macOS / Linux:**
 
@@ -43,13 +55,30 @@ it, and place the `hevy-mcp.exe` in your PATH, or run it directly:
 .\hevy-mcp.exe --help
 ```
 
-### 2. Run via Cargo (from source)
+### Install `hevy-cli` via Release Asset
+
+Download the matching `hevy-cli-*` archive from the
+[Releases page](https://github.com/Brandon168/hevy-mcp-rust/releases), extract
+it, and place `hevy-cli` on your `PATH`.
+
+Example for Linux x86_64:
+
+```bash
+curl -L -o hevy-cli-linux-x86_64.tar.gz \
+  https://github.com/Brandon168/hevy-mcp-rust/releases/latest/download/hevy-cli-linux-x86_64.tar.gz
+tar -xzf hevy-cli-linux-x86_64.tar.gz
+chmod +x hevy-cli
+sudo mv hevy-cli /usr/local/bin/
+hevy-cli --help
+```
+
+### Run from Source
 
 ```bash
 git clone https://github.com/Brandon168/hevy-mcp-rust.git
 cd hevy-mcp-rust
-# Provide API key and run
-HEVY_API_KEY=sk_live_... cargo run --release
+HEVY_API_KEY=sk_live_... cargo run --release --bin hevy-mcp
+HEVY_API_KEY=sk_live_... cargo run --release --bin hevy-cli -- auth test
 ```
 
 ## Prerequisites
@@ -89,16 +118,17 @@ HEVY_API_KEY=sk_live_your_key_here
 
 > **Never commit your `.env` file or API keys to source control.**
 
-### Optional: `hevy-cli`
+### `hevy-cli`
 
-This repo also builds a direct command-line client for agent skills and ad hoc
-automation. It reuses the same typed Hevy API client as the MCP server, but does
-not start an MCP process.
+Use `hevy-cli` for direct shell usage, automation, or agent skills. It does not
+start an MCP server.
 
 ```bash
-cargo run --bin hevy-cli -- --help
-HEVY_API_KEY=sk_live_... cargo run --bin hevy-cli -- workouts list --page 1 --page-size 10
-HEVY_API_KEY=sk_live_... cargo run --bin hevy-cli -- export workouts --weeks 3 --full
+hevy-cli auth test
+hevy-cli workouts list --page 1 --page-size 10
+hevy-cli workouts get --id <workout_id>
+hevy-cli export workouts --weeks 3 --full
+hevy-cli export routine-bundle --routine-id <routine_id> --weeks 3
 ```
 
 Write commands require `--confirm`:
@@ -115,6 +145,11 @@ destination expected by your agent runtime:
 cargo build --release --bin hevy-cli
 ./scripts/install-hevy-skill.sh /path/to/agent/skills/hevy
 ```
+
+### `hevy-mcp`
+
+Use `hevy-mcp` when an MCP-capable client should discover and call Hevy tools.
+It runs as a server over stdio by default or over streamable HTTP when requested.
 
 ### Transport Mode
 
@@ -218,13 +253,20 @@ transport (such as **LobeChat**, **LibreChat**, or **IDE plugins**):
 hevy-mcp-rust/
 ├── Cargo.toml              # Package manifest and dependencies
 ├── .env                    # Local API key (not committed)
+├── skills/
+│   └── hevy/               # Agent skill wrapper for hevy-cli
+├── scripts/
+│   └── install-hevy-skill.sh
 ├── src/
-│   ├── main.rs             # CLI entry point (thin wrapper)
+│   ├── main.rs             # hevy-mcp entry point
 │   ├── lib.rs              # Library root (exports client, tools, types)
 │   ├── client.rs           # HevyClient — typed REST API wrapper
+│   ├── bin/
+│   │   └── hevy-cli.rs     # Direct command-line client
 │   ├── types.rs            # Serde + JsonSchema typed structs
 │   └── tools.rs            # HevyTools — all 20 MCP tool implementations
 ├── tests/
+│   ├── cli_test.rs         # hevy-cli command tests
 │   ├── integration_test.rs # Full E2E tests (stdio & streamable-http)
 │   ├── client_test.rs      # Unit tests for HevyClient using wiremock
 │   └── deserialize_test.rs # Verification of API response parsing
