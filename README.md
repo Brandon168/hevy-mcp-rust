@@ -89,6 +89,33 @@ HEVY_API_KEY=sk_live_your_key_here
 
 > **Never commit your `.env` file or API keys to source control.**
 
+### Optional: `hevy-cli`
+
+This repo also builds a direct command-line client for agent skills and ad hoc
+automation. It reuses the same typed Hevy API client as the MCP server, but does
+not start an MCP process.
+
+```bash
+cargo run --bin hevy-cli -- --help
+HEVY_API_KEY=sk_live_... cargo run --bin hevy-cli -- workouts list --page 1 --page-size 10
+HEVY_API_KEY=sk_live_... cargo run --bin hevy-cli -- export workouts --weeks 3 --full
+```
+
+Write commands require `--confirm`:
+
+```bash
+hevy-cli routines create --input routine.json --confirm
+hevy-cli webhooks delete --confirm
+```
+
+To install the local skill wrapper after building a release binary, pass the
+destination expected by your agent runtime:
+
+```bash
+cargo build --release --bin hevy-cli
+./scripts/install-hevy-skill.sh /path/to/agent/skills/hevy
+```
+
 ### Transport Mode
 
 | Flag                          | Default    | Description                                                          |

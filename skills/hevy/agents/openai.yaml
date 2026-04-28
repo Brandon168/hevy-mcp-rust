@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hevy"
+  short_description: "Live Hevy workout data via CLI"
+  default_prompt: "Use $hevy to export my recent workouts with full details."

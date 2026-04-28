@@ -44,6 +44,7 @@ schemars = "1.2.1"
 
 # CLI arg parsing
 clap = { version = "4", features = ["derive", "env"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 # .env file loading
 dotenvy = "0.15"
