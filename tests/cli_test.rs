@@ -130,7 +130,9 @@ async fn test_cli_read_commands_emit_json() {
         .await;
     Mock::given(method("GET"))
         .and(path("/v1/routines/r1"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(routine_json("r1")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "routine": routine_json("r1")
+        })))
         .mount(&mock_server)
         .await;
     Mock::given(method("GET"))
@@ -480,7 +482,9 @@ async fn test_cli_exports_preserve_full_notes() {
         .await;
     Mock::given(method("GET"))
         .and(path("/v1/routines/r1"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(routine_json("r1")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "routine": routine_json("r1")
+        })))
         .mount(&mock_server)
         .await;
 

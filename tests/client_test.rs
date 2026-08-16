@@ -39,6 +39,55 @@ async fn test_client_get_workouts() {
 }
 
 #[tokio::test]
+async fn test_client_get_routine_accepts_api_wrapper() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/v1/routines/routine_1"))
+        .and(header("api-key", "test_key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "routine": {
+                "id": "routine_1",
+                "title": "Push Day",
+                "folder_id": 42,
+                "updated_at": "2026-08-16T20:00:00Z",
+                "created_at": "2026-08-16T19:00:00Z",
+                "exercises": [
+                    {
+                        "index": 0,
+                        "title": "Bench Press",
+                        "notes": null,
+                        "exercise_template_id": "template_1",
+                        "superset_id": null,
+                        "rest_seconds": 120,
+                        "sets": [
+                            {
+                                "index": 0,
+                                "type": "normal",
+                                "weight_kg": 80.0,
+                                "reps": 8,
+                                "distance_meters": null,
+                                "duration_seconds": null,
+                                "custom_metric": null
+                            }
+                        ]
+                    }
+                ]
+            }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let client = HevyClient::with_base_url("test_key".to_string(), mock_server.uri()).unwrap();
+    let routine = client.get_routine("routine_1").await.unwrap();
+
+    assert_eq!(routine.id, "routine_1");
+    assert_eq!(routine.title, "Push Day");
+    assert_eq!(routine.exercises.len(), 1);
+    assert_eq!(routine.exercises[0].sets.len(), 1);
+}
+
+#[tokio::test]
 async fn test_client_error_handling() {
     let mock_server = MockServer::start().await;
 

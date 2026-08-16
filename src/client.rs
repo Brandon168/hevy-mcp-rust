@@ -73,6 +73,18 @@ impl HevyClient {
         }
     }
 
+    /// Deserialize a resource returned either directly or under its API wrapper key.
+    async fn handle_resource_response<T: serde::de::DeserializeOwned>(
+        &self,
+        response: reqwest::Response,
+        wrapper_key: &str,
+    ) -> Result<T, HevyClientError> {
+        let body: serde_json::Value = self.handle_response(response).await?;
+        let resource = body.get(wrapper_key).cloned().unwrap_or(body);
+        serde_json::from_value(resource)
+            .map_err(|e| HevyClientError::ParseError(e.to_string()))
+    }
+
     // --- WORKOUTS ---
     #[instrument(skip(self), err)]
     pub async fn get_workouts(
@@ -92,7 +104,7 @@ impl HevyClient {
     pub async fn get_workout(&self, id: &str) -> Result<Workout, HevyClientError> {
         let url = format!("{}/v1/workouts/{}", self.base_url, id);
         let res = self.http_client.get(&url).send().await?;
-        self.handle_response(res).await
+        self.handle_resource_response(res, "workout").await
     }
 
     #[instrument(skip(self), err)]
@@ -124,7 +136,7 @@ impl HevyClient {
     ) -> Result<Workout, HevyClientError> {
         let url = format!("{}/v1/workouts", self.base_url);
         let res = self.http_client.post(&url).json(&payload).send().await?;
-        self.handle_response(res).await
+        self.handle_resource_response(res, "workout").await
     }
 
     #[instrument(skip(self, payload), err)]
@@ -135,7 +147,7 @@ impl HevyClient {
     ) -> Result<Workout, HevyClientError> {
         let url = format!("{}/v1/workouts/{}", self.base_url, id);
         let res = self.http_client.put(&url).json(&payload).send().await?;
-        self.handle_response(res).await
+        self.handle_resource_response(res, "workout").await
     }
 
     // --- ROUTINES ---
@@ -157,7 +169,7 @@ impl HevyClient {
     pub async fn get_routine(&self, id: &str) -> Result<Routine, HevyClientError> {
         let url = format!("{}/v1/routines/{}", self.base_url, id);
         let res = self.http_client.get(&url).send().await?;
-        self.handle_response(res).await
+        self.handle_resource_response(res, "routine").await
     }
 
     #[instrument(skip(self, payload), err)]
@@ -167,7 +179,7 @@ impl HevyClient {
     ) -> Result<Routine, HevyClientError> {
         let url = format!("{}/v1/routines", self.base_url);
         let res = self.http_client.post(&url).json(&payload).send().await?;
-        self.handle_response(res).await
+        self.handle_resource_response(res, "routine").await
     }
 
     #[instrument(skip(self, payload), err)]
@@ -178,7 +190,7 @@ impl HevyClient {
     ) -> Result<Routine, HevyClientError> {
         let url = format!("{}/v1/routines/{}", self.base_url, id);
         let res = self.http_client.put(&url).json(&payload).send().await?;
-        self.handle_response(res).await
+        self.handle_resource_response(res, "routine").await
     }
 
     // --- FOLDERS ---
@@ -201,7 +213,7 @@ impl HevyClient {
     pub async fn get_folder(&self, id: &str) -> Result<RoutineFolder, HevyClientError> {
         let url = format!("{}/v1/routine_folders/{}", self.base_url, id);
         let res = self.http_client.get(&url).send().await?;
-        self.handle_response(res).await
+        self.handle_resource_response(res, "routine_folder").await
     }
 
     #[instrument(skip(self, payload), err)]
@@ -211,7 +223,7 @@ impl HevyClient {
     ) -> Result<RoutineFolder, HevyClientError> {
         let url = format!("{}/v1/routine_folders", self.base_url);
         let res = self.http_client.post(&url).json(&payload).send().await?;
-        self.handle_response(res).await
+        self.handle_resource_response(res, "routine_folder").await
     }
 
     // --- TEMPLATES ---
@@ -233,7 +245,7 @@ impl HevyClient {
     pub async fn get_template(&self, id: &str) -> Result<ExerciseTemplate, HevyClientError> {
         let url = format!("{}/v1/exercise_templates/{}", self.base_url, id);
         let res = self.http_client.get(&url).send().await?;
-        self.handle_response(res).await
+        self.handle_resource_response(res, "exercise_template").await
     }
 
     /// Get exercise history for a specific exercise template
