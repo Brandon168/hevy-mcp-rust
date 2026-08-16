@@ -2,11 +2,10 @@ name: CI
 
 on:
   push:
-    branches:
-      - master
   pull_request:
     branches:
       - master
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -27,3 +26,19 @@ jobs:
 
       - name: Run tests
         run: cargo test
+
+      - name: Build Linux binaries
+        run: cargo build --release --bin hevy-cli --bin hevy-mcp
+
+      - name: Package Linux binaries
+        run: |
+          mkdir -p dist
+          tar -C target/release -czf dist/hevy-cli-linux-x86_64.tar.gz hevy-cli
+          tar -C target/release -czf dist/hevy-mcp-linux-x86_64.tar.gz hevy-mcp
+          sha256sum dist/*.tar.gz > dist/SHA256SUMS
+
+      - name: Upload Linux binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: hevy-linux-x86_64-${{ github.sha }}
+          path: dist/
