@@ -72,6 +72,25 @@ sudo mv hevy-cli /usr/local/bin/
 hevy-cli --help
 ```
 
+### Download CI-Built Binaries
+
+Every branch push, pull request, and manual CI dispatch builds Linux x86_64
+archives for both binaries and uploads them as a workflow artifact. This is the
+preferred way to test a branch build before creating a release:
+
+1. Open the branch's completed **CI** run under the repository's
+   [Actions page](https://github.com/Brandon168/hevy-mcp-rust/actions).
+2. Download the `hevy-linux-x86_64-<commit-sha>` artifact.
+3. Verify `dist/SHA256SUMS`, then extract the matching archive from `dist/`.
+
+From a shell, the same artifact can be downloaded with:
+
+```bash
+gh run download <run-id> \
+  --repo Brandon168/hevy-mcp-rust \
+  --name hevy-linux-x86_64-<commit-sha>
+```
+
 ### Run from Source
 
 ```bash
