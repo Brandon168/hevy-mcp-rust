@@ -81,8 +81,7 @@ impl HevyClient {
     ) -> Result<T, HevyClientError> {
         let body: serde_json::Value = self.handle_response(response).await?;
         let resource = body.get(wrapper_key).cloned().unwrap_or(body);
-        serde_json::from_value(resource)
-            .map_err(|e| HevyClientError::ParseError(e.to_string()))
+        serde_json::from_value(resource).map_err(|e| HevyClientError::ParseError(e.to_string()))
     }
 
     // --- WORKOUTS ---
@@ -245,7 +244,8 @@ impl HevyClient {
     pub async fn get_template(&self, id: &str) -> Result<ExerciseTemplate, HevyClientError> {
         let url = format!("{}/v1/exercise_templates/{}", self.base_url, id);
         let res = self.http_client.get(&url).send().await?;
-        self.handle_resource_response(res, "exercise_template").await
+        self.handle_resource_response(res, "exercise_template")
+            .await
     }
 
     /// Get exercise history for a specific exercise template
