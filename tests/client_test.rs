@@ -88,6 +88,126 @@ async fn test_client_get_routine_accepts_api_wrapper() {
 }
 
 #[tokio::test]
+async fn test_client_resources_accept_wrapped_and_unwrapped_responses() {
+    for wrapped in [false, true] {
+        let mock_server = MockServer::start().await;
+        let resources = [
+            (
+                "workouts",
+                "workout",
+                serde_json::json!({
+                    "id": "resource_1", "title": "Workout",
+                    "start_time": "2026-08-16T19:00:00Z",
+                    "end_time": "2026-08-16T20:00:00Z",
+                    "updated_at": "2026-08-16T20:00:00Z",
+                    "created_at": "2026-08-16T19:00:00Z",
+                    "exercises": []
+                }),
+            ),
+            (
+                "routines",
+                "routine",
+                serde_json::json!({
+                    "id": "resource_1", "title": "Routine", "folder_id": 42,
+                    "updated_at": "2026-08-16T20:00:00Z",
+                    "created_at": "2026-08-16T19:00:00Z",
+                    "exercises": []
+                }),
+            ),
+            (
+                "routine_folders",
+                "routine_folder",
+                serde_json::json!({
+                    "id": 42, "index": 0, "title": "Folder",
+                    "updated_at": "2026-08-16T20:00:00Z",
+                    "created_at": "2026-08-16T19:00:00Z"
+                }),
+            ),
+            (
+                "exercise_templates",
+                "exercise_template",
+                serde_json::json!({
+                    "id": "resource_1", "title": "Bench Press", "type": "weight_reps",
+                    "primary_muscle_group": "chest", "secondary_muscle_groups": [],
+                    "is_custom": false
+                }),
+            ),
+        ];
+
+        for (endpoint, wrapper_key, resource) in resources {
+            let response = if wrapped {
+                serde_json::json!({ (wrapper_key): resource })
+            } else {
+                resource
+            };
+            let id = if endpoint == "routine_folders" {
+                "42"
+            } else {
+                "resource_1"
+            };
+            let mut operations = vec![("GET", format!("/v1/{endpoint}/{id}"))];
+            if endpoint != "exercise_templates" {
+                operations.push(("POST", format!("/v1/{endpoint}")));
+            }
+            if endpoint == "workouts" || endpoint == "routines" {
+                operations.push(("PUT", format!("/v1/{endpoint}/{id}")));
+            }
+            for (verb, resource_path) in operations {
+                Mock::given(method(verb))
+                    .and(path(resource_path))
+                    .and(header("api-key", "test_key"))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(response.clone()))
+                    .expect(1)
+                    .mount(&mock_server)
+                    .await;
+            }
+        }
+
+        let client = HevyClient::with_base_url("test_key".to_string(), mock_server.uri()).unwrap();
+        let payload = serde_json::json!({});
+        assert_eq!(
+            client.get_workout("resource_1").await.unwrap().id,
+            "resource_1"
+        );
+        assert_eq!(
+            client.create_workout(payload.clone()).await.unwrap().id,
+            "resource_1"
+        );
+        assert_eq!(
+            client
+                .update_workout("resource_1", payload.clone())
+                .await
+                .unwrap()
+                .id,
+            "resource_1"
+        );
+        assert_eq!(
+            client.get_routine("resource_1").await.unwrap().id,
+            "resource_1"
+        );
+        assert_eq!(
+            client.create_routine(payload.clone()).await.unwrap().id,
+            "resource_1"
+        );
+        assert_eq!(
+            client
+                .update_routine("resource_1", payload.clone())
+                .await
+                .unwrap()
+                .id,
+            "resource_1"
+        );
+        assert_eq!(client.get_folder("42").await.unwrap().id, 42);
+        assert_eq!(client.create_folder(payload).await.unwrap().id, 42);
+        assert_eq!(
+            client.get_template("resource_1").await.unwrap().id,
+            "resource_1"
+        );
+        mock_server.verify().await;
+    }
+}
+
+#[tokio::test]
 async fn test_client_error_handling() {
     let mock_server = MockServer::start().await;
 
