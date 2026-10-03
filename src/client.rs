@@ -3,6 +3,12 @@ use reqwest::{header, Client, StatusCode};
 use thiserror::Error;
 use tracing::instrument;
 
+fn parse_time(value: &str) -> Result<chrono::DateTime<chrono::Utc>, HevyClientError> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|t| t.with_timezone(&chrono::Utc))
+        .map_err(|e| HevyClientError::ParseError(format!("invalid timestamp {value:?}: {e}")))
+}
+
 #[derive(Error, Debug)]
 #[allow(clippy::enum_variant_names)] // "Error" suffix is idiomatic for Rust error enums
 pub enum HevyClientError {
@@ -376,6 +382,134 @@ impl HevyClient {
         } else {
             Err(HevyClientError::ApiError { status })
         }
+    }
+
+    // --- SUMMARY ---
+
+    /// Aggregate a training window client-side: scan workouts and body
+    /// measurements (10 per page), keep items on/after `cutoff`, and total
+    /// duration, exercises, sets, volume (weight_kg × reps when both are
+    /// finite), plus the earliest/latest measurement and weight change.
+    /// `weeks` bounds (1-12 tool, 1-520 CLI) are enforced by callers.
+    #[instrument(skip(self), err)]
+    pub async fn training_summary(
+        &self,
+        weeks: u32,
+        cutoff: chrono::DateTime<chrono::Utc>,
+    ) -> Result<TrainingSummary, HevyClientError> {
+        let now = chrono::Utc::now();
+        let mut summary = TrainingSummary {
+            start_date: cutoff.format("%Y-%m-%d").to_string(),
+            end_date: now.format("%Y-%m-%d").to_string(),
+            weeks,
+            workout_count: 0,
+            total_duration_seconds: 0,
+            exercise_count: 0,
+            set_count: 0,
+            total_volume_kg: 0.0,
+            unique_exercise_template_ids: Vec::new(),
+            sessions: Vec::new(),
+            measurement_count: 0,
+            earliest_measurement: None,
+            latest_measurement: None,
+            weight_change_kg: None,
+            pages_scanned: 0,
+        };
+        let mut seen_templates = std::collections::HashSet::new();
+
+        let mut page = 1u32;
+        loop {
+            let list = self.get_workouts(page, 10).await?;
+            summary.pages_scanned += 1;
+            let mut saw_recent = false;
+            for w in list.workouts {
+                let start = parse_time(&w.start_time)?;
+                if start < cutoff {
+                    continue;
+                }
+                saw_recent = true;
+                summary.workout_count += 1;
+                summary.exercise_count += w.exercises.len();
+                let mut session_sets = 0usize;
+                for e in &w.exercises {
+                    session_sets += e.sets.len();
+                    if let Some(id) = e.exercise_template_id.as_deref() {
+                        if seen_templates.insert(id.to_string()) {
+                            summary.unique_exercise_template_ids.push(id.to_string());
+                        }
+                    }
+                    for s in &e.sets {
+                        if let (Some(kg), Some(reps)) = (s.weight_kg, s.reps) {
+                            let reps = reps as f64;
+                            if kg.is_finite() && reps.is_finite() {
+                                summary.total_volume_kg += kg * reps;
+                            }
+                        }
+                    }
+                }
+                summary.set_count += session_sets;
+                let duration = parse_time(&w.end_time)? - start;
+                let duration_seconds = duration.num_seconds().max(0);
+                summary.total_duration_seconds += duration_seconds;
+                summary.sessions.push(SummarySession {
+                    id: w.id,
+                    title: w.title,
+                    start_time: w.start_time,
+                    end_time: w.end_time,
+                    duration_seconds,
+                    exercise_count: w.exercises.len(),
+                    set_count: session_sets,
+                });
+            }
+            if page >= list.page_count as u32 || !saw_recent {
+                break;
+            }
+            page += 1;
+        }
+
+        // Measurements: API returns newest-first; collect in-window, then the
+        // earliest/latest are the min/max by date.
+        let mut in_window: Vec<BodyMeasurement> = Vec::new();
+        let mut mpage = 1u32;
+        loop {
+            let list = self.get_body_measurements(mpage, 10).await?;
+            summary.pages_scanned += 1;
+            if list.body_measurements.is_empty() {
+                break;
+            }
+            let mut saw_any = false;
+            for m in list.body_measurements {
+                if m.date.as_str() >= summary.start_date.as_str() {
+                    saw_any = true;
+                    in_window.push(m);
+                }
+            }
+            if mpage >= list.page_count as u32 || !saw_any {
+                break;
+            }
+            mpage += 1;
+        }
+        in_window.sort_by(|a, b| a.date.cmp(&b.date));
+        summary.measurement_count = in_window.len();
+        let compact = |m: &BodyMeasurement| SummaryMeasurement {
+            date: m.date.clone(),
+            weight_kg: m.weight_kg,
+            lean_mass_kg: m.lean_mass_kg,
+            fat_percent: m.fat_percent,
+        };
+        summary.earliest_measurement = in_window.first().map(compact);
+        summary.latest_measurement = in_window.last().map(compact);
+        summary.weight_change_kg = match (
+            summary.earliest_measurement.as_ref(),
+            summary.latest_measurement.as_ref(),
+        ) {
+            (Some(a), Some(b)) => match (a.weight_kg, b.weight_kg) {
+                (Some(x), Some(y)) => Some(y - x),
+                _ => None,
+            },
+            _ => None,
+        };
+        Ok(summary)
     }
 
     // --- WEBHOOKS (singleton, no ID) ---

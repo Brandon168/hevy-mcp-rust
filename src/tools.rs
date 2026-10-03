@@ -216,6 +216,21 @@ pub struct GetBodyMeasurementParams {
     pub date: String,
 }
 
+// ─── Summary params ──────────────────────────────────────────────────────────
+
+/// Tool input: aggregate a recent training window (client-side scan)
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct TrainingSummaryParams {
+    /// Weeks of history to include (1-12)
+    #[schemars(range(min = 1, max = 12))]
+    #[serde(default = "default_summary_weeks")]
+    pub weeks: u32,
+}
+
+pub fn default_summary_weeks() -> u32 {
+    4
+}
+
 // ─── Webhook params ─────────────────────────────────────────────────────────
 
 /// Tool input: create a new webhook subscription
@@ -944,6 +959,27 @@ impl HevyTools {
         Ok(Json(res))
     }
 
+    #[tool(
+        name = "get-training-summary",
+        description = "Summarize 1-12 weeks of workout activity and body-measurement trends in one call: workout/volume/session totals plus earliest/latest measurements and weight change."
+    )]
+    async fn get_training_summary(
+        &self,
+        params: Parameters<TrainingSummaryParams>,
+    ) -> Result<Json<TrainingSummary>, String> {
+        if params.0.weeks == 0 || params.0.weeks > 12 {
+            return Err("weeks must be between 1 and 12".to_string());
+        }
+        // chrono is already a dependency; compute the cutoff here.
+        let cutoff = chrono::Utc::now() - chrono::Duration::weeks(params.0.weeks as i64);
+        let res = self
+            .client
+            .training_summary(params.0.weeks, cutoff)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(Json(res))
+    }
+
     // ─── Webhooks ────────────────────────────────────────────────────────────
 
     #[tool(
@@ -1009,13 +1045,13 @@ mod tests {
         HevyTools::new(client)
     }
 
-    /// 27 tools: the original 20 plus 4 measurements, get-user-info,
-    /// search-exercise-templates, and search-routines.
+    /// 28 tools: the original 20 plus 4 measurements, get-user-info,
+    /// search-exercise-templates, search-routines, and get-training-summary.
     #[tokio::test]
     async fn test_tools_list_count() {
         let tools = make_tools();
         let list = tools.tool_router.list_all();
-        assert_eq!(list.len(), 27, "Expected 27 tools, got {}", list.len());
+        assert_eq!(list.len(), 28, "Expected 28 tools, got {}", list.len());
         let resp = rmcp::model::ListToolsResult {
             tools: list,
             meta: None,
@@ -1075,6 +1111,7 @@ mod tests {
             "get-user-info",
             "search-exercise-templates",
             "search-routines",
+            "get-training-summary",
             "get-webhook-subscription",
             "create-webhook-subscription",
             "delete-webhook-subscription",
@@ -1186,6 +1223,15 @@ mod tests {
             serde_json::json!(100),
             "search-routines.limit must have maximum:100; got: {}",
             sr["properties"]["limit"]
+        );
+
+        // ── get-training-summary weeks must be bounded 1-12 ─────────────────
+        let ts = &schema_map["get-training-summary"];
+        assert_eq!(
+            ts["properties"]["weeks"]["maximum"],
+            serde_json::json!(12),
+            "get-training-summary.weeks must have maximum:12; got: {}",
+            ts["properties"]["weeks"]
         );
 
         println!("All tool schema checks passed!");

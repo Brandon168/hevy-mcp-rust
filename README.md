@@ -38,7 +38,7 @@ Python runtime.
 - **Direct CLI** — `hevy-cli` provides JSON-first commands and guarded writes
   with `--confirm` (`workouts`, `routines` + `routines search`, `folders`,
   `templates` + `templates search`, `exercises`, `measurements`, `user`,
-  `webhooks`, `export`, `auth`)
+  `summary`, `webhooks`, `export`, `auth`)
 - **Agent Skill** — `skills/hevy` documents how agents should call `hevy-cli`
 
 ## Quick Start
@@ -159,6 +159,7 @@ Write commands require `--confirm`:
 ```bash
 hevy-cli routines create --input routine.json --confirm
 hevy-cli measurements create --date 2026-04-21 --input measurement.json --confirm
+hevy-cli summary --weeks 4
 hevy-cli webhooks delete --confirm
 ```
 
@@ -283,6 +284,12 @@ transport (such as **LobeChat**, **LibreChat**, or **IDE plugins**):
 | Tool              | Description                                                  |
 | ----------------- | ------------------------------------------------------------ |
 | `search-routines` | Case-insensitive title search, compact hits, `--limit` 1–100 |
+
+### Training Summary
+
+| Tool                   | Description                                                               |
+| ---------------------- | ------------------------------------------------------------------------- |
+| `get-training-summary` | 1–12 weeks of workout/volume/session totals + measurement trend endpoints |
 
 ### Webhook Tools
 

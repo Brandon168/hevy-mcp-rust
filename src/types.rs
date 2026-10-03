@@ -157,6 +157,47 @@ pub struct BodyMeasurement {
     pub right_calf: Option<f64>,
 }
 
+/// Compact per-session entry inside a training summary
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+pub struct SummarySession {
+    pub id: String,
+    pub title: String,
+    pub start_time: String,
+    pub end_time: String,
+    pub duration_seconds: i64,
+    pub exercise_count: usize,
+    pub set_count: usize,
+}
+
+/// Compact measurement endpoint record inside a training summary
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+pub struct SummaryMeasurement {
+    pub date: String,
+    pub weight_kg: Option<f64>,
+    pub lean_mass_kg: Option<f64>,
+    pub fat_percent: Option<f64>,
+}
+
+/// Aggregated training window: workout totals + measurement trend endpoints
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+pub struct TrainingSummary {
+    pub start_date: String,
+    pub end_date: String,
+    pub weeks: u32,
+    pub workout_count: u32,
+    pub total_duration_seconds: i64,
+    pub exercise_count: usize,
+    pub set_count: usize,
+    pub total_volume_kg: f64,
+    pub unique_exercise_template_ids: Vec<String>,
+    pub sessions: Vec<SummarySession>,
+    pub measurement_count: usize,
+    pub earliest_measurement: Option<SummaryMeasurement>,
+    pub latest_measurement: Option<SummaryMeasurement>,
+    pub weight_change_kg: Option<f64>,
+    pub pages_scanned: u32,
+}
+
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 pub struct BodyMeasurementListSchema {
     pub page: i32,

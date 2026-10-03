@@ -804,3 +804,111 @@ async fn test_cli_search_commands_scan_pages() {
             .success()
     );
 }
+
+#[tokio::test]
+async fn test_cli_summary_aggregates_window() {
+    let mock_server = MockServer::start().await;
+
+    // Two workouts inside a 520-week window; e1's sets give volume.
+    Mock::given(method("GET"))
+        .and(path("/v1/workouts"))
+        .and(query_param("page", "1"))
+        .and(query_param("pageSize", "10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "page": 1,
+            "page_count": 1,
+            "workouts": [
+                {
+                    "id": "w1",
+                    "title": "Morning Lift",
+                    "description": null,
+                    "routine_id": null,
+                    "start_time": "2026-04-20T08:00:00Z",
+                    "end_time": "2026-04-20T09:00:00Z",
+                    "updated_at": "2026-04-20T09:00:00Z",
+                    "created_at": "2026-04-20T08:00:00Z",
+                    "exercises": [
+                        {
+                            "index": 0,
+                            "title": "Bench Press",
+                            "notes": null,
+                            "exercise_template_id": "e1",
+                            "supersets_id": null,
+                            "sets": [
+                                {"index": 0, "type": "normal", "weight_kg": 80.0, "reps": 8},
+                                {"index": 1, "type": "normal", "weight_kg": 80.0, "reps": 8}
+                            ]
+                        },
+                        {
+                            "index": 1,
+                            "title": "Squat",
+                            "notes": null,
+                            "exercise_template_id": "e2",
+                            "supersets_id": null,
+                            "sets": []
+                        }
+                    ]
+                },
+                {
+                    "id": "w0",
+                    "title": "Old Session",
+                    "description": null,
+                    "routine_id": null,
+                    "start_time": "2020-01-01T08:00:00Z",
+                    "end_time": "2020-01-01T09:00:00Z",
+                    "updated_at": "2020-01-01T09:00:00Z",
+                    "created_at": "2020-01-01T08:00:00Z",
+                    "exercises": []
+                }
+            ]
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/body_measurements"))
+        .and(query_param("page", "1"))
+        .and(query_param("pageSize", "10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "page": 1,
+            "page_count": 1,
+            "body_measurements": [
+                {"date": "2026-04-21", "weight_kg": 81.0},
+                {"date": "2026-04-19", "weight_kg": 80.0}
+            ]
+        })))
+        .mount(&mock_server)
+        .await;
+
+    // Fixture dates are April 2026 and "now" is Oct 2026: --weeks 40
+    // (cutoff ~Jan 2026) keeps w1 while excluding the Jan-2020 workout,
+    // proving the cutoff filters.
+    let summary = assert_json_success(run_cli(&mock_server, &["summary", "--weeks", "40"]));
+    assert_eq!(summary["workout_count"], 1);
+    assert_eq!(summary["weeks"], 40);
+    assert_eq!(summary["total_volume_kg"], 1280.0);
+    assert_eq!(summary["exercise_count"], 2);
+    assert_eq!(summary["set_count"], 2);
+    assert_eq!(summary["total_duration_seconds"], 3600);
+    assert_eq!(summary["sessions"][0]["id"], "w1");
+    assert_eq!(summary["sessions"][0]["set_count"], 2);
+    assert_eq!(
+        summary["unique_exercise_template_ids"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(summary["measurement_count"], 2);
+    assert_eq!(summary["earliest_measurement"]["date"], "2026-04-19");
+    assert_eq!(summary["latest_measurement"]["date"], "2026-04-21");
+    assert_eq!(summary["weight_change_kg"], 1.0);
+    assert_eq!(summary["pages_scanned"], 2);
+
+    // Bounds are explicit errors, not clamps.
+    assert!(!run_cli(&mock_server, &["summary", "--weeks", "0"])
+        .status
+        .success());
+    assert!(!run_cli(&mock_server, &["summary", "--weeks", "521"])
+        .status
+        .success());
+}

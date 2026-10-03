@@ -47,6 +47,7 @@ enum Commands {
     Exercises(ExercisesCommand),
     Measurements(MeasurementsCommand),
     User(UserCommand),
+    Summary(SummaryArgs),
     Webhooks(WebhooksCommand),
     Export(ExportCommand),
     Auth(AuthCommand),
@@ -319,6 +320,13 @@ struct ExportRoutineBundleArgs {
     weeks: i64,
 }
 
+#[derive(Args)]
+struct SummaryArgs {
+    /// Weeks of history to include (1-520)
+    #[arg(long, default_value_t = 1)]
+    weeks: u32,
+}
+
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
@@ -349,6 +357,13 @@ async fn dispatch(client: &HevyClient, command: Commands) -> Result<Value> {
         Commands::Exercises(args) => handle_exercises(client, args.command).await,
         Commands::Measurements(args) => handle_measurements(client, args.command).await,
         Commands::User(args) => handle_user(client, args.command).await,
+        Commands::Summary(args) => {
+            if args.weeks == 0 || args.weeks > 520 {
+                bail!("--weeks must be between 1 and 520");
+            }
+            let cutoff = Utc::now() - Duration::weeks(args.weeks as i64);
+            to_value(client.training_summary(args.weeks, cutoff).await)
+        }
         Commands::Webhooks(args) => handle_webhooks(client, args.command).await,
         Commands::Export(args) => handle_export(client, args.command).await,
         Commands::Auth(args) => handle_auth(client, args.command).await,
