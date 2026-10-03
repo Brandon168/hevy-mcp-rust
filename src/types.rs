@@ -135,6 +135,42 @@ pub struct ExerciseTemplate {
     pub is_custom: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+pub struct BodyMeasurement {
+    pub date: String,
+    pub weight_kg: Option<f64>,
+    pub lean_mass_kg: Option<f64>,
+    pub fat_percent: Option<f64>,
+    pub neck_cm: Option<f64>,
+    pub shoulder_cm: Option<f64>,
+    pub chest_cm: Option<f64>,
+    pub left_bicep_cm: Option<f64>,
+    pub right_bicep_cm: Option<f64>,
+    pub left_forearm_cm: Option<f64>,
+    pub right_forearm_cm: Option<f64>,
+    pub abdomen: Option<f64>,
+    pub waist: Option<f64>,
+    pub hips: Option<f64>,
+    pub left_thigh: Option<f64>,
+    pub right_thigh: Option<f64>,
+    pub left_calf: Option<f64>,
+    pub right_calf: Option<f64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+pub struct BodyMeasurementListSchema {
+    pub page: i32,
+    pub page_count: i32,
+    pub body_measurements: Vec<BodyMeasurement>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+pub struct UserInfo {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+}
+
 /// Mirrors Hevy's webhook object shape (kept for documentation; tool responses use WebhookResponse)
 #[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]

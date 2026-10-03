@@ -285,6 +285,99 @@ impl HevyClient {
         self.handle_response(res).await
     }
 
+    // --- USER ---
+
+    /// Get the authenticated user's info (GET /v1/user/info).
+    /// Returned under the `data` wrapper key.
+    #[instrument(skip(self), err)]
+    pub async fn get_user_info(&self) -> Result<UserInfo, HevyClientError> {
+        let url = format!("{}/v1/user/info", self.base_url);
+        let res = self.http_client.get(&url).send().await?;
+        self.handle_resource_response(res, "data").await
+    }
+
+    // --- MEASUREMENTS ---
+
+    #[instrument(skip(self), err)]
+    pub async fn get_body_measurements(
+        &self,
+        page: u32,
+        page_size: u32,
+    ) -> Result<BodyMeasurementListSchema, HevyClientError> {
+        let url = format!(
+            "{}/v1/body_measurements?page={}&pageSize={}",
+            self.base_url, page, page_size
+        );
+        let res = self.http_client.get(&url).send().await?;
+        self.handle_response(res).await
+    }
+
+    /// Get the body measurement for one YYYY-MM-DD date.
+    /// Returns None on 404 (no measurement for that date).
+    #[instrument(skip(self), err)]
+    pub async fn get_body_measurement(
+        &self,
+        date: &str,
+    ) -> Result<Option<BodyMeasurement>, HevyClientError> {
+        let url = format!("{}/v1/body_measurements/{}", self.base_url, date);
+        let res = self.http_client.get(&url).send().await?;
+        if res.status() == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        self.handle_response(res).await.map(Some)
+    }
+
+    /// Create a body measurement entry. The `date` is part of the body;
+    /// explicit nulls are omitted because the API rejects them.
+    /// POST returns 200 with an empty body, so no response is parsed.
+    /// A duplicate date surfaces as a 409 ClientError.
+    #[instrument(skip(self, payload), err)]
+    pub async fn create_body_measurement(
+        &self,
+        payload: serde_json::Value,
+    ) -> Result<(), HevyClientError> {
+        let url = format!("{}/v1/body_measurements", self.base_url);
+        let res = self.http_client.post(&url).json(&payload).send().await?;
+        let status = res.status();
+        if status.is_success() {
+            Ok(())
+        } else if status.is_client_error() {
+            let message = res.text().await.unwrap_or_default();
+            Err(HevyClientError::ClientError { status, message })
+        } else if status.is_server_error() {
+            let message = res.text().await.unwrap_or_default();
+            Err(HevyClientError::ServerError { status, message })
+        } else {
+            Err(HevyClientError::ApiError { status })
+        }
+    }
+
+    /// Update the measurement for a date. The API overwrites every field and
+    /// rejects explicit nulls, so callers must pass a payload where omitted
+    /// fields were filled from the existing record and nulls were dropped.
+    /// PUT returns 200 with an empty body, so no response is parsed.
+    #[instrument(skip(self, payload), err)]
+    pub async fn update_body_measurement(
+        &self,
+        date: &str,
+        payload: serde_json::Value,
+    ) -> Result<(), HevyClientError> {
+        let url = format!("{}/v1/body_measurements/{}", self.base_url, date);
+        let res = self.http_client.put(&url).json(&payload).send().await?;
+        let status = res.status();
+        if status.is_success() {
+            Ok(())
+        } else if status.is_client_error() {
+            let message = res.text().await.unwrap_or_default();
+            Err(HevyClientError::ClientError { status, message })
+        } else if status.is_server_error() {
+            let message = res.text().await.unwrap_or_default();
+            Err(HevyClientError::ServerError { status, message })
+        } else {
+            Err(HevyClientError::ApiError { status })
+        }
+    }
+
     // --- WEBHOOKS (singleton, no ID) ---
 
     /// Get the account's webhook subscription (GET /v1/webhooks)

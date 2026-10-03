@@ -45,6 +45,8 @@ enum Commands {
     Folders(FoldersCommand),
     Templates(TemplatesCommand),
     Exercises(ExercisesCommand),
+    Measurements(MeasurementsCommand),
+    User(UserCommand),
     Webhooks(WebhooksCommand),
     Export(ExportCommand),
     Auth(AuthCommand),
@@ -123,11 +125,36 @@ struct WebhooksCommand {
     command: WebhooksSubcommand,
 }
 
+#[derive(Args)]
+struct MeasurementsCommand {
+    #[command(subcommand)]
+    command: MeasurementsSubcommand,
+}
+
+#[derive(Args)]
+struct UserCommand {
+    #[command(subcommand)]
+    command: UserSubcommand,
+}
+
 #[derive(Subcommand)]
 enum WebhooksSubcommand {
     Get,
     Create(WebhookCreateArgs),
     Delete(ConfirmArgs),
+}
+
+#[derive(Subcommand)]
+enum MeasurementsSubcommand {
+    List(PageArgs),
+    Get(DateArgs),
+    Create(MeasurementInputConfirmArgs),
+    Update(MeasurementInputConfirmArgs),
+}
+
+#[derive(Subcommand)]
+enum UserSubcommand {
+    Info,
 }
 
 #[derive(Args)]
@@ -173,6 +200,24 @@ struct TemplatePageArgs {
 struct IdArgs {
     #[arg(long)]
     id: String,
+}
+
+#[derive(Args)]
+struct DateArgs {
+    #[arg(long)]
+    date: String,
+}
+
+#[derive(Args)]
+struct MeasurementInputConfirmArgs {
+    /// Measurement date (YYYY-MM-DD); for create it must also appear in the input JSON.
+    #[arg(long)]
+    date: String,
+    /// JSON file path, or '-' to read JSON from stdin.
+    #[arg(long)]
+    input: String,
+    #[arg(long)]
+    confirm: bool,
 }
 
 #[derive(Args)]
@@ -281,6 +326,8 @@ async fn dispatch(client: &HevyClient, command: Commands) -> Result<Value> {
         Commands::Folders(args) => handle_folders(client, args.command).await,
         Commands::Templates(args) => handle_templates(client, args.command).await,
         Commands::Exercises(args) => handle_exercises(client, args.command).await,
+        Commands::Measurements(args) => handle_measurements(client, args.command).await,
+        Commands::User(args) => handle_user(client, args.command).await,
         Commands::Webhooks(args) => handle_webhooks(client, args.command).await,
         Commands::Export(args) => handle_export(client, args.command).await,
         Commands::Auth(args) => handle_auth(client, args.command).await,
@@ -375,6 +422,139 @@ async fn handle_exercises(client: &HevyClient, command: ExercisesSubcommand) -> 
             )
             .await
             .map_err(Into::into),
+    }
+}
+
+async fn handle_measurements(
+    client: &HevyClient,
+    command: MeasurementsSubcommand,
+) -> Result<Value> {
+    match command {
+        MeasurementsSubcommand::List(args) => to_value(
+            client
+                .get_body_measurements(args.page, args.page_size)
+                .await,
+        ),
+        MeasurementsSubcommand::Get(args) => {
+            let measurement = client.get_body_measurement(&args.date).await?;
+            match measurement {
+                Some(m) => Ok(serde_json::to_value(m)?),
+                None => bail!("no body measurement found for date {}", args.date),
+            }
+        }
+        MeasurementsSubcommand::Create(args) => {
+            require_confirm(args.confirm)?;
+            let mut payload = read_json_input(&args.input)?;
+            normalize_measurement_input(&mut payload, Some(&args.date), true)?;
+            client.create_body_measurement(payload).await?;
+            Ok(json!({ "status": "success", "date": args.date }))
+        }
+        MeasurementsSubcommand::Update(args) => {
+            require_confirm(args.confirm)?;
+            // Patch-over-PUT: read the existing record, merge supplied fields,
+            // drop explicit nulls (the API rejects them).
+            let existing = client
+                .get_body_measurement(&args.date)
+                .await?
+                .ok_or_else(|| {
+                    anyhow::anyhow!("no body measurement found for date {}", args.date)
+                })?;
+            let mut existing_value = serde_json::to_value(existing)?;
+            let changes = read_json_input(&args.input)?;
+            normalize_measurement_input(&mut existing_value, None, false)?;
+            merge_measurement_json(&mut existing_value, &changes)?;
+            normalize_measurement_input(&mut existing_value, Some(&args.date), false)?;
+            // PUT body is PutBodyMeasurement: date lives in the path, not the body.
+            if let Some(obj) = existing_value.as_object_mut() {
+                obj.remove("date");
+            }
+            client
+                .update_body_measurement(&args.date, existing_value)
+                .await?;
+            Ok(json!({ "status": "success", "date": args.date }))
+        }
+    }
+}
+
+/// Validate a measurement JSON object in place: must be an object, `date`
+/// must be present and (when `date` is Some) match the CLI date argument,
+/// numeric fields must be finite numbers, and explicit nulls are dropped
+/// because the API rejects them. Create mode requires at least one numeric
+/// field; update mode requires at least one supplied field (checked by the
+/// caller merging onto the existing record).
+fn normalize_measurement_input(
+    value: &mut Value,
+    date: Option<&str>,
+    require_numeric: bool,
+) -> Result<()> {
+    let obj = value
+        .as_object_mut()
+        .context("measurement input must be a JSON object")?;
+    if let Some(date) = date {
+        match obj.get("date") {
+            Some(Value::String(d)) if d == date => {}
+            Some(Value::String(d)) => {
+                bail!("input date {d} does not match --date {date}");
+            }
+            Some(_) => bail!("input date must be a string"),
+            None => {
+                obj.insert("date".to_string(), Value::String(date.to_string()));
+            }
+        }
+    }
+    obj.retain(|k, v| {
+        if k == "date" {
+            return true;
+        }
+        if v.is_null() {
+            eprintln!("warning: omitting null field {k} — the Hevy API rejects explicit nulls");
+            return false;
+        }
+        if !v.is_number() {
+            return true; // leave for the API to reject with a clear field error
+        }
+        if !v.as_f64().is_some_and(f64::is_finite) {
+            return true;
+        }
+        true
+    });
+    if require_numeric && !obj.keys().any(|k| k != "date") {
+        bail!("measurement input needs at least one numeric field (e.g. weight_kg)");
+    }
+    Ok(())
+}
+
+/// Merge a changes object onto the existing measurement JSON: supplied
+/// non-null values win, explicit nulls are ignored (the API has no clear
+/// operation), and omitted fields keep their existing values.
+fn merge_measurement_json(existing: &mut Value, changes: &Value) -> Result<()> {
+    let existing_obj = existing
+        .as_object_mut()
+        .context("existing measurement is not a JSON object")?;
+    let changes_obj = changes
+        .as_object()
+        .context("measurement input must be a JSON object")?;
+    let mut supplied = false;
+    for (key, value) in changes_obj {
+        if key == "date" {
+            continue;
+        }
+        supplied = true;
+        if value.is_null() {
+            eprintln!("warning: ignoring null for {key} — measurement fields cannot be cleared");
+            continue;
+        }
+        existing_obj.insert(key.clone(), value.clone());
+    }
+    if !supplied {
+        bail!("measurement update needs at least one supplied field");
+    }
+    Ok(())
+}
+
+async fn handle_user(client: &HevyClient, command: UserSubcommand) -> Result<Value> {
+    match command {
+        UserSubcommand::Info => to_value(client.get_user_info().await),
     }
 }
 

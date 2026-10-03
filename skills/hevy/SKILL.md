@@ -1,6 +1,6 @@
 ---
 name: hevy
-description: Use when working with live Hevy fitness data through the hevy-cli binary, including workouts, routines, routine folders, exercise templates, exercise history, exports, and webhooks.
+description: Use when working with live Hevy fitness data through the hevy-cli binary, including workouts, routines, routine folders, exercise templates, exercise history, body measurements, user info, exports, and webhooks.
 ---
 
 # Hevy
@@ -23,6 +23,8 @@ Use `hevy-cli` for live Hevy account operations. This skill is for command-drive
 - Full workout history window: `hevy-cli export workouts --weeks <n> --full`
 - Routine context plus recent logs: `hevy-cli export routine-bundle --routine-id <routine_id> --weeks <n>`
 - Exercise history: `hevy-cli exercises history --template-id <template_id> --start-date <yyyy-mm-dd> --end-date <yyyy-mm-dd>`
+- Body measurements: `hevy-cli measurements list`, `hevy-cli measurements get --date <yyyy-mm-dd>`
+- User info: `hevy-cli user info`
 - Webhooks: use only when the user explicitly asks about webhook subscriptions.
 
 ## Read Commands
@@ -40,6 +42,9 @@ hevy-cli folders get --id <folder_id>
 hevy-cli templates list --page 1 --page-size 100
 hevy-cli templates get --id <template_id>
 hevy-cli exercises history --template-id <template_id> --start-date 2026-01-01 --end-date 2026-01-31
+hevy-cli measurements list --page 1 --page-size 10
+hevy-cli measurements get --date 2026-01-15
+hevy-cli user info
 hevy-cli webhooks get
 ```
 
@@ -67,6 +72,17 @@ hevy-cli folders create --title "New Folder" --confirm
 hevy-cli templates create --input template.json --confirm
 hevy-cli webhooks create --url https://example.com/hevy --confirm
 hevy-cli webhooks delete --confirm
+```
+
+Measurement writes take `--date` plus `--input` JSON. For `create`, the input
+`date` must match `--date` (it is filled in when absent); explicit nulls are
+dropped with a warning because the API rejects them. For `update`, the CLI
+reads the existing record first and merges: supplied values win, nulls are
+ignored (fields cannot be cleared), omitted fields are preserved.
+
+```bash
+hevy-cli measurements create --date 2026-04-21 --input measurement.json --confirm
+hevy-cli measurements update --date 2026-04-22 --input patch.json --confirm
 ```
 
 `--input -` reads JSON from stdin. JSON payloads may be either the raw object or the Hevy API wrapper object, such as `{ "workout": ... }`, `{ "routine": ... }`, or `{ "exercise": ... }` (the `exercise` key matches Hevy's create-template envelope).

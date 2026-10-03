@@ -69,6 +69,29 @@ fn folder_json() -> Value {
     })
 }
 
+fn measurement_json(date: &str) -> Value {
+    json!({
+        "date": date,
+        "weight_kg": 80.5,
+        "lean_mass_kg": 65.0,
+        "fat_percent": 18.5,
+        "neck_cm": null,
+        "shoulder_cm": null,
+        "chest_cm": null,
+        "left_bicep_cm": null,
+        "right_bicep_cm": null,
+        "left_forearm_cm": null,
+        "right_forearm_cm": null,
+        "abdomen": null,
+        "waist": null,
+        "hips": null,
+        "left_thigh": null,
+        "right_thigh": null,
+        "left_calf": null,
+        "right_calf": null
+    })
+}
+
 fn template_json(id: &str) -> Value {
     json!({
         "id": id,
@@ -189,6 +212,33 @@ async fn test_cli_read_commands_emit_json() {
         })))
         .mount(&mock_server)
         .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/body_measurements"))
+        .and(query_param("page", "1"))
+        .and(query_param("pageSize", "10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "page": 1,
+            "page_count": 1,
+            "body_measurements": [measurement_json("2026-04-20")]
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/body_measurements/2026-04-20"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(measurement_json("2026-04-20")))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/user/info"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": {
+                "id": "u1",
+                "name": "Test User",
+                "url": "https://hevy.com/user/test"
+            }
+        })))
+        .mount(&mock_server)
+        .await;
 
     assert_eq!(
         assert_json_success(run_cli(&mock_server, &["workouts", "list"]))["workouts"][0]["id"],
@@ -231,6 +281,22 @@ async fn test_cli_read_commands_emit_json() {
     assert_eq!(
         assert_json_success(run_cli(&mock_server, &["templates", "get", "--id", "e1"]))["id"],
         "e1"
+    );
+    assert_eq!(
+        assert_json_success(run_cli(&mock_server, &["measurements", "list"]))["body_measurements"]
+            [0]["weight_kg"],
+        80.5
+    );
+    assert_eq!(
+        assert_json_success(run_cli(
+            &mock_server,
+            &["measurements", "get", "--date", "2026-04-20"],
+        ))["weight_kg"],
+        80.5
+    );
+    assert_eq!(
+        assert_json_success(run_cli(&mock_server, &["user", "info"]))["id"],
+        "u1"
     );
     assert_json_success(run_cli(
         &mock_server,
@@ -343,6 +409,38 @@ async fn test_cli_write_commands_require_confirm_and_wrap_payloads() {
         .respond_with(ResponseTemplate::new(204))
         .mount(&mock_server)
         .await;
+    // Create drops explicit nulls (the API rejects them): input carries
+    // weight_kg plus a nulled waist; the mock asserts the exact sent body.
+    Mock::given(method("POST"))
+        .and(path("/v1/body_measurements"))
+        .and(body_json(json!({
+            "date": "2026-04-21",
+            "weight_kg": 81.0
+        })))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&mock_server)
+        .await;
+    // Update merges onto the existing record: input changes weight_kg and
+    // nulls waist (ignored); the mock asserts the merged body with waist
+    // preserved at null-dropped absence and date excluded.
+    Mock::given(method("GET"))
+        .and(path("/v1/body_measurements/2026-04-22"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "date": "2026-04-22",
+            "weight_kg": 80.0,
+            "waist": 82.0
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/v1/body_measurements/2026-04-22"))
+        .and(body_json(json!({
+            "weight_kg": 81.0,
+            "waist": 82.0
+        })))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&mock_server)
+        .await;
 
     let refused = run_cli(&mock_server, &["folders", "create", "--title", "Strength"]);
     assert!(!refused.status.success());
@@ -445,6 +543,75 @@ async fn test_cli_write_commands_require_confirm_and_wrap_payloads() {
         assert_json_success(run_cli(&mock_server, &["webhooks", "delete", "--confirm"]))["status"],
         "success"
     );
+
+    // measurements create: input JSON carries an explicit null (waist) that
+    // must be dropped before sending.
+    let measurement_path =
+        temp_dir.join(format!("hevy-cli-measurement-{}.json", std::process::id()));
+    std::fs::write(
+        &measurement_path,
+        r#"{"date": "2026-04-21", "weight_kg": 81.0, "waist": null}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        assert_json_success(run_cli(
+            &mock_server,
+            &[
+                "measurements",
+                "create",
+                "--date",
+                "2026-04-21",
+                "--input",
+                measurement_path.to_str().unwrap(),
+                "--confirm",
+            ],
+        ))["date"],
+        "2026-04-21"
+    );
+
+    // measurements update: merges weight_kg change onto the existing record,
+    // ignores the nulled waist, preserves the existing waist value.
+    let measurement_update_path = temp_dir.join(format!(
+        "hevy-cli-measurement-update-{}.json",
+        std::process::id()
+    ));
+    std::fs::write(
+        &measurement_update_path,
+        r#"{"weight_kg": 81.0, "waist": null}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        assert_json_success(run_cli(
+            &mock_server,
+            &[
+                "measurements",
+                "update",
+                "--date",
+                "2026-04-22",
+                "--input",
+                measurement_update_path.to_str().unwrap(),
+                "--confirm",
+            ],
+        ))["date"],
+        "2026-04-22"
+    );
+
+    // measurements get on a missing date is an explicit error, not null JSON.
+    Mock::given(method("GET"))
+        .and(path("/v1/body_measurements/2026-01-01"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+            "error": "not found"
+        })))
+        .mount(&mock_server)
+        .await;
+    let missing = run_cli(
+        &mock_server,
+        &["measurements", "get", "--date", "2026-01-01"],
+    );
+    assert!(!missing.status.success());
+
+    let _ = std::fs::remove_file(measurement_path);
+    let _ = std::fs::remove_file(measurement_update_path);
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_hevy-cli"))
         .args(["templates", "create", "--input", "-", "--confirm"])

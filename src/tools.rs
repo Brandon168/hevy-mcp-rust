@@ -156,6 +156,40 @@ pub struct CreateExerciseTemplateParams {
     pub other_muscles: Vec<MuscleGroup>,
 }
 
+// ─── Measurement params ────────────────────────────────────────────────────
+
+/// Tool input: create or update a body measurement. All fields except `date`
+/// are optional; explicit nulls are omitted because the API rejects them.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct BodyMeasurementParams {
+    /// Measurement date (YYYY-MM-DD)
+    pub date: String,
+    pub weight_kg: Option<f64>,
+    pub lean_mass_kg: Option<f64>,
+    pub fat_percent: Option<f64>,
+    pub neck_cm: Option<f64>,
+    pub shoulder_cm: Option<f64>,
+    pub chest_cm: Option<f64>,
+    pub left_bicep_cm: Option<f64>,
+    pub right_bicep_cm: Option<f64>,
+    pub left_forearm_cm: Option<f64>,
+    pub right_forearm_cm: Option<f64>,
+    pub abdomen: Option<f64>,
+    pub waist: Option<f64>,
+    pub hips: Option<f64>,
+    pub left_thigh: Option<f64>,
+    pub right_thigh: Option<f64>,
+    pub left_calf: Option<f64>,
+    pub right_calf: Option<f64>,
+}
+
+/// Tool input: fetch the body measurement for one date
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct GetBodyMeasurementParams {
+    /// Measurement date (YYYY-MM-DD)
+    pub date: String,
+}
+
 // ─── Webhook params ─────────────────────────────────────────────────────────
 
 /// Tool input: create a new webhook subscription
@@ -199,6 +233,96 @@ pub struct ExerciseHistoryResponse {
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
 pub struct ExerciseTemplateResponse {
     pub exercise_template: Option<serde_json::Value>,
+}
+
+/// Build the measurement wire object from tool input, dropping nulls the
+/// API rejects. `for_create` includes `date`; update callers merge first and
+/// send only numeric fields.
+fn measurement_payload(
+    params: &BodyMeasurementParams,
+    for_create: bool,
+) -> Result<serde_json::Value, String> {
+    let mut map = serde_json::Map::new();
+    if for_create {
+        map.insert(
+            "date".to_string(),
+            serde_json::Value::String(params.date.clone()),
+        );
+    }
+    let fields: [(&str, Option<f64>); 17] = [
+        ("weight_kg", params.weight_kg),
+        ("lean_mass_kg", params.lean_mass_kg),
+        ("fat_percent", params.fat_percent),
+        ("neck_cm", params.neck_cm),
+        ("shoulder_cm", params.shoulder_cm),
+        ("chest_cm", params.chest_cm),
+        ("left_bicep_cm", params.left_bicep_cm),
+        ("right_bicep_cm", params.right_bicep_cm),
+        ("left_forearm_cm", params.left_forearm_cm),
+        ("right_forearm_cm", params.right_forearm_cm),
+        ("abdomen", params.abdomen),
+        ("waist", params.waist),
+        ("hips", params.hips),
+        ("left_thigh", params.left_thigh),
+        ("right_thigh", params.right_thigh),
+        ("left_calf", params.left_calf),
+        ("right_calf", params.right_calf),
+    ];
+    for (key, value) in fields {
+        if let Some(v) = value {
+            map.insert(
+                key.to_string(),
+                serde_json::Number::from_f64(v)
+                    .map(serde_json::Value::Number)
+                    .ok_or_else(|| format!("{key} must be a finite number"))?,
+            );
+        }
+    }
+    if map.len() == (for_create as usize) {
+        return Err("at least one numeric measurement field is required".to_string());
+    }
+    Ok(serde_json::Value::Object(map))
+}
+
+/// Merge tool input over the existing record for PUT: supplied values win,
+/// explicit null input leaves the existing value in place (the API has no
+/// clear operation), and omitted input fields are preserved.
+fn merged_measurement_payload(
+    existing: &BodyMeasurement,
+    params: &BodyMeasurementParams,
+) -> Result<serde_json::Value, String> {
+    // Explicit JSON nulls in tool input arrive as None — indistinguishable
+    // from omitted, so they preserve the existing value by construction.
+    let merged = BodyMeasurementParams {
+        date: params.date.clone(),
+        weight_kg: params.weight_kg.or(existing.weight_kg),
+        lean_mass_kg: params.lean_mass_kg.or(existing.lean_mass_kg),
+        fat_percent: params.fat_percent.or(existing.fat_percent),
+        neck_cm: params.neck_cm.or(existing.neck_cm),
+        shoulder_cm: params.shoulder_cm.or(existing.shoulder_cm),
+        chest_cm: params.chest_cm.or(existing.chest_cm),
+        left_bicep_cm: params.left_bicep_cm.or(existing.left_bicep_cm),
+        right_bicep_cm: params.right_bicep_cm.or(existing.right_bicep_cm),
+        left_forearm_cm: params.left_forearm_cm.or(existing.left_forearm_cm),
+        right_forearm_cm: params.right_forearm_cm.or(existing.right_forearm_cm),
+        abdomen: params.abdomen.or(existing.abdomen),
+        waist: params.waist.or(existing.waist),
+        hips: params.hips.or(existing.hips),
+        left_thigh: params.left_thigh.or(existing.left_thigh),
+        right_thigh: params.right_thigh.or(existing.right_thigh),
+        left_calf: params.left_calf.or(existing.left_calf),
+        right_calf: params.right_calf.or(existing.right_calf),
+    };
+    measurement_payload(&merged, false)
+}
+
+/// Typed response wrapper for a single-date measurement lookup: the
+/// measurement is null when no entry exists for that date (object root keeps
+/// the MCP output schema valid).
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+pub struct BodyMeasurementResponse {
+    pub date: String,
+    pub body_measurement: Option<BodyMeasurement>,
 }
 
 /// Typed response wrapper for webhook subscription
@@ -564,6 +688,101 @@ impl HevyTools {
         Ok(Json(typed))
     }
 
+    // ─── Measurements ────────────────────────────────────────────────────
+
+    #[tool(
+        name = "get-body-measurements",
+        description = "Get a paginated list of dated body measurements. page_size must be between 1 and 10. Use get-body-measurement for one date."
+    )]
+    async fn get_body_measurements(
+        &self,
+        params: Parameters<PaginationParams>,
+    ) -> Result<Json<BodyMeasurementListSchema>, String> {
+        let res = self
+            .client
+            .get_body_measurements(params.0.page, params.0.page_size)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(Json(res))
+    }
+
+    #[tool(
+        name = "get-body-measurement",
+        description = "Get the body measurement for one YYYY-MM-DD date. Returns null when no measurement exists for that date."
+    )]
+    async fn get_body_measurement(
+        &self,
+        params: Parameters<GetBodyMeasurementParams>,
+    ) -> Result<Json<BodyMeasurementResponse>, String> {
+        let res = self
+            .client
+            .get_body_measurement(&params.0.date)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(Json(BodyMeasurementResponse {
+            date: params.0.date,
+            body_measurement: res,
+        }))
+    }
+
+    #[tool(
+        name = "create-body-measurement",
+        description = "Create a body measurement for a new YYYY-MM-DD date. At least one numeric field is required. Returns 409 if a measurement already exists for that date; use update-body-measurement instead."
+    )]
+    async fn create_body_measurement(
+        &self,
+        params: Parameters<BodyMeasurementParams>,
+    ) -> Result<Json<SuccessResponse>, String> {
+        let payload = measurement_payload(&params.0, true)?;
+        self.client
+            .create_body_measurement(payload)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(Json(SuccessResponse {
+            status: "success".to_string(),
+        }))
+    }
+
+    #[tool(
+        name = "update-body-measurement",
+        description = "Update the body measurement for an existing YYYY-MM-DD date. Omitted fields keep their current values; fields cannot be cleared. The date must already have a measurement."
+    )]
+    async fn update_body_measurement(
+        &self,
+        params: Parameters<BodyMeasurementParams>,
+    ) -> Result<Json<SuccessResponse>, String> {
+        let existing = self
+            .client
+            .get_body_measurement(&params.0.date)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("no measurement found for date {}", params.0.date))?;
+        let payload = merged_measurement_payload(&existing, &params.0)?;
+        self.client
+            .update_body_measurement(&params.0.date, payload)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(Json(SuccessResponse {
+            status: "success".to_string(),
+        }))
+    }
+
+    #[tool(
+        name = "get-user-info",
+        description = "Get the authenticated Hevy user ID, display name, and public profile URL."
+    )]
+    async fn get_user_info(
+        &self,
+        _params: Parameters<EmptyParams>,
+    ) -> Result<Json<UserInfo>, String> {
+        let res = self
+            .client
+            .get_user_info()
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(Json(res))
+    }
+
     // ─── Webhooks ────────────────────────────────────────────────────────────
 
     #[tool(
@@ -629,17 +848,13 @@ mod tests {
         HevyTools::new(client)
     }
 
-    /// Phase 4: verify the tool count matches the reference TS implementation (20 tools).
+    /// 25 tools: the original 20 plus get/create/update-body-measurement,
+    /// get-body-measurements, and get-user-info.
     #[tokio::test]
     async fn test_tools_list_count() {
         let tools = make_tools();
         let list = tools.tool_router.list_all();
-        assert_eq!(
-            list.len(),
-            20,
-            "Expected 20 tools (matching reference TS), got {}",
-            list.len()
-        );
+        assert_eq!(list.len(), 25, "Expected 25 tools, got {}", list.len());
         let resp = rmcp::model::ListToolsResult {
             tools: list,
             meta: None,
@@ -692,6 +907,11 @@ mod tests {
             "get-exercise-template",
             "get-exercise-history",
             "create-exercise-template",
+            "get-body-measurements",
+            "get-body-measurement",
+            "create-body-measurement",
+            "update-body-measurement",
+            "get-user-info",
             "get-webhook-subscription",
             "create-webhook-subscription",
             "delete-webhook-subscription",

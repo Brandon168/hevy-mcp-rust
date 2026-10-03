@@ -31,10 +31,13 @@ Python runtime.
 - **Routine Management** — Access and manage workout routines and folders
 - **Exercise Templates** — Browse available templates; create custom ones
 - **Exercise History** — Query past sets for any exercise template
+- **Body Measurements** — List, read, create, and patch dated measurements
+- **User Info** — Authenticated profile (ID, display name, URL)
 - **Webhook Subscriptions** — Create, view, and delete webhook subscriptions
 - **Dual Transport** — Runs over `stdio` (default) or `streamable-http` (SSE)
 - **Direct CLI** — `hevy-cli` provides JSON-first commands and guarded writes
-  with `--confirm`
+  with `--confirm` (`workouts`, `routines`, `folders`, `templates`,
+  `exercises`, `measurements`, `user`, `webhooks`, `export`, `auth`)
 - **Agent Skill** — `skills/hevy` documents how agents should call `hevy-cli`
 
 ## Quick Start
@@ -154,6 +157,7 @@ Write commands require `--confirm`:
 
 ```bash
 hevy-cli routines create --input routine.json --confirm
+hevy-cli measurements create --date 2026-04-21 --input measurement.json --confirm
 hevy-cli webhooks delete --confirm
 ```
 
@@ -169,6 +173,7 @@ cargo build --release --bin hevy-cli
 
 Use `hevy-mcp` when an MCP-capable client should discover and call Hevy tools.
 It runs as a server over stdio by default or over streamable HTTP when requested.
+All 25 tools are listed under Available MCP Tools below.
 
 ### Transport Mode
 
@@ -229,6 +234,21 @@ transport (such as **LobeChat**, **LibreChat**, or **IDE plugins**):
 | `get-workout-events` | Paginated workout update/delete events since a date |
 | `create-workout`     | Log a new workout with exercises and sets           |
 | `update-workout`     | Modify an existing workout                          |
+
+### Measurement Tools
+
+| Tool                      | Description                                              |
+| ------------------------- | -------------------------------------------------------- |
+| `get-body-measurements`   | Paginated list of dated body measurements                |
+| `get-body-measurement`    | Single measurement by date (`YYYY-MM-DD`)                |
+| `create-body-measurement` | Create a measurement for a new date (409 on duplicates)  |
+| `update-body-measurement` | Patch numeric fields on an existing date (read-then-PUT) |
+
+### User Tools
+
+| Tool            | Description                                              |
+| --------------- | -------------------------------------------------------- |
+| `get-user-info` | Authenticated user ID, display name, and profile URL     |
 
 ### Routine Tools
 
