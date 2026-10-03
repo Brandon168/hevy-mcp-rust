@@ -22,6 +22,8 @@ Use `hevy-cli` for live Hevy account operations. This skill is for command-drive
 - Specific workout details: `hevy-cli workouts get --id <workout_id>`
 - Full workout history window: `hevy-cli export workouts --weeks <n> --full`
 - Routine context plus recent logs: `hevy-cli export routine-bundle --routine-id <routine_id> --weeks <n>`
+- Template search: `hevy-cli templates search <query> [--muscle-group <group>]`
+- Routine search: `hevy-cli routines search [query] [--limit <n>]`
 - Exercise history: `hevy-cli exercises history --template-id <template_id> --start-date <yyyy-mm-dd> --end-date <yyyy-mm-dd>`
 - Body measurements: `hevy-cli measurements list`, `hevy-cli measurements get --date <yyyy-mm-dd>`
 - User info: `hevy-cli user info`
@@ -41,6 +43,8 @@ hevy-cli folders list --page 1 --page-size 10
 hevy-cli folders get --id <folder_id>
 hevy-cli templates list --page 1 --page-size 100
 hevy-cli templates get --id <template_id>
+hevy-cli templates search bench --muscle-group chest
+hevy-cli routines search push --limit 10
 hevy-cli exercises history --template-id <template_id> --start-date 2026-01-01 --end-date 2026-01-31
 hevy-cli measurements list --page 1 --page-size 10
 hevy-cli measurements get --date 2026-01-15

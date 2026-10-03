@@ -80,6 +80,17 @@ enum RoutinesSubcommand {
     Get(IdArgs),
     Create(InputConfirmArgs),
     Update(UpdateInputConfirmArgs),
+    Search(RoutineSearchArgs),
+}
+
+#[derive(Args)]
+struct RoutineSearchArgs {
+    /// Case-insensitive substring to match against routine titles.
+    /// Omit to list compact routine metadata (bounded by --limit).
+    query: Option<String>,
+    /// Maximum matches to return
+    #[arg(long, default_value_t = 20)]
+    limit: u32,
 }
 
 #[derive(Args)]
@@ -106,6 +117,16 @@ enum TemplatesSubcommand {
     List(TemplatePageArgs),
     Get(IdArgs),
     Create(InputConfirmArgs),
+    Search(TemplateSearchArgs),
+}
+
+#[derive(Args)]
+struct TemplateSearchArgs {
+    /// Case-insensitive substring to match against template titles
+    query: String,
+    /// Optional exact primary muscle group filter
+    #[arg(long = "muscle-group")]
+    muscle_group: Option<String>,
 }
 
 #[derive(Args)]
@@ -378,6 +399,52 @@ async fn handle_routines(client: &HevyClient, command: RoutinesSubcommand) -> Re
                     .await,
             )
         }
+        RoutinesSubcommand::Search(args) => {
+            if args.limit == 0 || args.limit > 100 {
+                bail!("--limit must be between 1 and 100");
+            }
+            let needle = args
+                .query
+                .as_deref()
+                .map(str::to_lowercase)
+                .filter(|q| !q.trim().is_empty());
+            let mut routines = Vec::new();
+            let mut scanned = 0usize;
+            let mut page = 1u32;
+            'pages: loop {
+                let list = client.get_routines(page, 10).await?;
+                scanned += list.routines.len();
+                let page_count = list.page_count;
+                let empty = list.routines.is_empty();
+                for r in list.routines {
+                    if needle
+                        .as_ref()
+                        .map_or(true, |q| r.title.to_lowercase().contains(q))
+                    {
+                        routines.push(json!({
+                            "id": r.id,
+                            "title": r.title,
+                            "folder_id": r.folder_id,
+                            "updated_at": r.updated_at,
+                            "exercise_count": r.exercises.len(),
+                            "set_count": r.exercises.iter().map(|e| e.sets.len()).sum::<usize>(),
+                        }));
+                        if routines.len() >= args.limit as usize {
+                            break 'pages;
+                        }
+                    }
+                }
+                if page >= page_count as u32 || empty {
+                    break;
+                }
+                page += 1;
+            }
+            Ok(json!({
+                "query": args.query,
+                "routines": routines,
+                "routines_scanned": scanned,
+            }))
+        }
     }
 }
 
@@ -408,6 +475,42 @@ async fn handle_templates(client: &HevyClient, command: TemplatesSubcommand) -> 
                 .create_exercise_template(payload)
                 .await
                 .map_err(Into::into)
+        }
+        TemplatesSubcommand::Search(args) => {
+            let needle = args.query.to_lowercase();
+            if needle.trim().is_empty() {
+                bail!("query must not be empty");
+            }
+            let mut matches = Vec::new();
+            let mut scanned = 0usize;
+            let mut page = 1u32;
+            loop {
+                let list = client.get_templates(page, 100).await?;
+                scanned += list.exercise_templates.len();
+                let page_count = list.page_count;
+                let empty = list.exercise_templates.is_empty();
+                matches.extend(
+                    list.exercise_templates
+                        .into_iter()
+                        .filter(|t| {
+                            t.title.to_lowercase().contains(&needle)
+                                && args.muscle_group.as_ref().map_or(true, |m| {
+                                    t.primary_muscle_group.eq_ignore_ascii_case(m)
+                                })
+                        })
+                        .map(|t| serde_json::to_value(t))
+                        .collect::<Result<Vec<_>, _>>()?,
+                );
+                if page >= page_count as u32 || empty {
+                    break;
+                }
+                page += 1;
+            }
+            Ok(json!({
+                "query": args.query,
+                "matches": matches,
+                "templates_scanned": scanned,
+            }))
         }
     }
 }

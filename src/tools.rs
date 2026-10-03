@@ -128,6 +128,32 @@ pub struct GetTemplateParams {
     pub id: String,
 }
 
+/// Tool input: search the exercise template catalog by title substring
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SearchTemplatesParams {
+    /// Case-insensitive substring to match against template titles
+    pub query: String,
+    /// Optional exact primary muscle group filter
+    pub primary_muscle_group: Option<MuscleGroup>,
+}
+
+/// Tool input: search routines by title substring
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SearchRoutinesParams {
+    /// Case-insensitive substring to match against routine titles.
+    /// Empty or omitted matches every routine (bounded by limit).
+    #[serde(default)]
+    pub query: Option<String>,
+    /// Maximum matches to return (1-100)
+    #[schemars(range(min = 1, max = 100))]
+    #[serde(default = "default_search_limit")]
+    pub limit: u32,
+}
+
+pub fn default_search_limit() -> u32 {
+    20
+}
+
 /// Tool input: get exercise history for a specific template, with optional date range
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct GetExerciseHistoryParams {
@@ -227,6 +253,34 @@ pub struct ExerciseHistoryResponse {
     pub page: Option<i32>,
     pub page_count: Option<i32>,
     pub exercise_history: Vec<serde_json::Value>,
+}
+
+/// Typed response wrapper for template search hits (compact: full objects
+/// would bloat agent context on a catalog-wide scan)
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+pub struct SearchTemplatesResponse {
+    pub query: String,
+    pub matches: Vec<ExerciseTemplate>,
+    pub templates_scanned: usize,
+}
+
+/// Typed response wrapper for routine search hits
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+pub struct SearchRoutinesResponse {
+    pub query: Option<String>,
+    pub routines: Vec<RoutineSummary>,
+    pub routines_scanned: usize,
+}
+
+/// Compact routine hit: metadata only, no exercises
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+pub struct RoutineSummary {
+    pub id: String,
+    pub title: String,
+    pub folder_id: Option<i32>,
+    pub updated_at: String,
+    pub exercise_count: usize,
+    pub set_count: usize,
 }
 
 /// Typed response wrapper for exercise template creation
@@ -637,6 +691,113 @@ impl HevyTools {
         Ok(Json(res))
     }
 
+    #[tool(
+        name = "search-exercise-templates",
+        description = "Search the full exercise template catalog by case-insensitive title substring, with an optional exact primary-muscle-group filter. Scans the whole catalog (100 per page) so results are complete; use get-exercise-template for full details on a hit."
+    )]
+    async fn search_templates(
+        &self,
+        params: Parameters<SearchTemplatesParams>,
+    ) -> Result<Json<SearchTemplatesResponse>, String> {
+        if params.0.query.trim().is_empty() {
+            return Err("query must not be empty".to_string());
+        }
+        let needle = params.0.query.to_lowercase();
+        let muscle: Option<String> = params.0.primary_muscle_group.map(|m| {
+            serde_json::to_value(&m)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_string))
+                .unwrap_or_default()
+        });
+        let mut matches = Vec::new();
+        let mut scanned = 0usize;
+        let mut page = 1u32;
+        loop {
+            let list = self
+                .client
+                .get_templates(page, 100)
+                .await
+                .map_err(|e| e.to_string())?;
+            scanned += list.exercise_templates.len();
+            let page_count = list.page_count;
+            let empty = list.exercise_templates.is_empty();
+            matches.extend(list.exercise_templates.into_iter().filter(|t| {
+                t.title.to_lowercase().contains(&needle)
+                    && muscle
+                        .as_ref()
+                        .map_or(true, |m| &t.primary_muscle_group == m)
+            }));
+            if page >= page_count as u32 || empty {
+                break;
+            }
+            page += 1;
+        }
+        Ok(Json(SearchTemplatesResponse {
+            query: params.0.query,
+            matches,
+            templates_scanned: scanned,
+        }))
+    }
+
+    #[tool(
+        name = "search-routines",
+        description = "Search your routines by case-insensitive title substring. Omit query to list compact routine metadata (bounded by limit). Returns id, title, folder, exercise/set counts — use get-routine for full details on a hit."
+    )]
+    async fn search_routines(
+        &self,
+        params: Parameters<SearchRoutinesParams>,
+    ) -> Result<Json<SearchRoutinesResponse>, String> {
+        if params.0.limit == 0 {
+            return Err("limit must be at least 1".to_string());
+        }
+        let needle = params
+            .0
+            .query
+            .as_deref()
+            .map(str::to_lowercase)
+            .filter(|q| !q.trim().is_empty());
+        let mut routines = Vec::new();
+        let mut scanned = 0usize;
+        let mut page = 1u32;
+        'pages: loop {
+            let list = self
+                .client
+                .get_routines(page, 10)
+                .await
+                .map_err(|e| e.to_string())?;
+            scanned += list.routines.len();
+            let page_count = list.page_count;
+            let empty = list.routines.is_empty();
+            for r in list.routines {
+                if needle
+                    .as_ref()
+                    .map_or(true, |q| r.title.to_lowercase().contains(q))
+                {
+                    routines.push(RoutineSummary {
+                        id: r.id,
+                        title: r.title,
+                        folder_id: r.folder_id,
+                        updated_at: r.updated_at,
+                        exercise_count: r.exercises.len(),
+                        set_count: r.exercises.iter().map(|e| e.sets.len()).sum(),
+                    });
+                    if routines.len() >= params.0.limit as usize {
+                        break 'pages;
+                    }
+                }
+            }
+            if page >= page_count as u32 || empty {
+                break;
+            }
+            page += 1;
+        }
+        Ok(Json(SearchRoutinesResponse {
+            query: params.0.query,
+            routines,
+            routines_scanned: scanned,
+        }))
+    }
+
     /// Get exercise history for a specific exercise template
     #[tool(
         name = "get-exercise-history",
@@ -848,13 +1009,13 @@ mod tests {
         HevyTools::new(client)
     }
 
-    /// 25 tools: the original 20 plus get/create/update-body-measurement,
-    /// get-body-measurements, and get-user-info.
+    /// 27 tools: the original 20 plus 4 measurements, get-user-info,
+    /// search-exercise-templates, and search-routines.
     #[tokio::test]
     async fn test_tools_list_count() {
         let tools = make_tools();
         let list = tools.tool_router.list_all();
-        assert_eq!(list.len(), 25, "Expected 25 tools, got {}", list.len());
+        assert_eq!(list.len(), 27, "Expected 27 tools, got {}", list.len());
         let resp = rmcp::model::ListToolsResult {
             tools: list,
             meta: None,
@@ -912,6 +1073,8 @@ mod tests {
             "create-body-measurement",
             "update-body-measurement",
             "get-user-info",
+            "search-exercise-templates",
+            "search-routines",
             "get-webhook-subscription",
             "create-webhook-subscription",
             "delete-webhook-subscription",
@@ -999,6 +1162,30 @@ mod tests {
             template_page_size["maximum"],
             serde_json::json!(100),
             "get-exercise-templates.page_size should allow maximum:100; got: {template_page_size}"
+        );
+
+        // ── search-exercise-templates must have query + muscle filter ────────
+        let st = &schema_map["search-exercise-templates"];
+        assert!(
+            st["properties"]["query"].is_object(),
+            "search-exercise-templates schema missing `query` property: {st}"
+        );
+        assert!(
+            st["properties"]["primary_muscle_group"].is_object(),
+            "search-exercise-templates schema missing `primary_muscle_group` property: {st}"
+        );
+
+        // ── search-routines limit must be bounded 1-100 ─────────────────────
+        let sr = &schema_map["search-routines"];
+        assert!(
+            sr["properties"]["query"].is_object(),
+            "search-routines schema missing `query` property: {sr}"
+        );
+        assert_eq!(
+            sr["properties"]["limit"]["maximum"],
+            serde_json::json!(100),
+            "search-routines.limit must have maximum:100; got: {}",
+            sr["properties"]["limit"]
         );
 
         println!("All tool schema checks passed!");

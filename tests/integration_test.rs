@@ -54,7 +54,7 @@ async fn test_full_mcp_client() {
     match tokio::time::timeout(Duration::from_secs(5), client.list_tools(None)).await {
         Ok(Ok(tools)) => {
             println!("Tools returned: {}", tools.tools.len());
-            assert_eq!(tools.tools.len(), 25);
+            assert_eq!(tools.tools.len(), 27);
         }
         Ok(Err(e)) => panic!("Error listing tools: {:?}", e),
         Err(_) => panic!("Timeout listing tools"),

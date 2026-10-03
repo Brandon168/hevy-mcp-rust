@@ -36,8 +36,9 @@ Python runtime.
 - **Webhook Subscriptions** — Create, view, and delete webhook subscriptions
 - **Dual Transport** — Runs over `stdio` (default) or `streamable-http` (SSE)
 - **Direct CLI** — `hevy-cli` provides JSON-first commands and guarded writes
-  with `--confirm` (`workouts`, `routines`, `folders`, `templates`,
-  `exercises`, `measurements`, `user`, `webhooks`, `export`, `auth`)
+  with `--confirm` (`workouts`, `routines` + `routines search`, `folders`,
+  `templates` + `templates search`, `exercises`, `measurements`, `user`,
+  `webhooks`, `export`, `auth`)
 - **Agent Skill** — `skills/hevy` documents how agents should call `hevy-cli`
 
 ## Quick Start
@@ -273,8 +274,15 @@ transport (such as **LobeChat**, **LibreChat**, or **IDE plugins**):
 | -------------------------- | --------------------------------------------------- |
 | `get-exercise-templates`   | Paginated list of exercise templates                |
 | `get-exercise-template`    | Single template by ID                               |
+| `search-exercise-templates`| Case-insensitive title substring search (full scan) |
 | `get-exercise-history`     | Past sets for a template (with optional date range) |
 | `create-exercise-template` | Create a custom exercise template                   |
+
+### Routine Search
+
+| Tool              | Description                                                  |
+| ----------------- | ------------------------------------------------------------ |
+| `search-routines` | Case-insensitive title search, compact hits, `--limit` 1–100 |
 
 ### Webhook Tools
 

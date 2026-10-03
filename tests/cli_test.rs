@@ -239,6 +239,19 @@ async fn test_cli_read_commands_emit_json() {
         })))
         .mount(&mock_server)
         .await;
+    // Search uses its own mock server (separate test below) so multi-page
+    // catalog fixtures don't clash with the single-page list mocks above.
+    Mock::given(method("GET"))
+        .and(path("/v1/routines"))
+        .and(query_param("page", "1"))
+        .and(query_param("pageSize", "10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "page": 1,
+            "page_count": 1,
+            "routines": [routine_json("r1")]
+        })))
+        .mount(&mock_server)
+        .await;
 
     assert_eq!(
         assert_json_success(run_cli(&mock_server, &["workouts", "list"]))["workouts"][0]["id"],
@@ -686,4 +699,108 @@ async fn test_cli_exports_preserve_full_notes() {
     ));
     assert_eq!(bundle["routineBundle"]["id"], "r1");
     assert_eq!(bundle["workoutLogs"][0]["description"], "Session note");
+}
+
+#[tokio::test]
+async fn test_cli_search_commands_scan_pages() {
+    let mock_server = MockServer::start().await;
+
+    // Two-page template catalog with mixed-case titles.
+    Mock::given(method("GET"))
+        .and(path("/v1/exercise_templates"))
+        .and(query_param("page", "1"))
+        .and(query_param("pageSize", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "page": 1,
+            "page_count": 2,
+            "exercise_templates": [template_json("e1"), {
+                "id": "eX",
+                "title": "Overhead Press",
+                "type": "weight_reps",
+                "primary_muscle_group": "shoulders",
+                "secondary_muscle_groups": [],
+                "is_custom": false
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/exercise_templates"))
+        .and(query_param("page", "2"))
+        .and(query_param("pageSize", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "page": 2,
+            "page_count": 2,
+            "exercise_templates": [{
+                "id": "e2",
+                "title": "BENCH Press Variation",
+                "type": "weight_reps",
+                "primary_muscle_group": "chest",
+                "secondary_muscle_groups": [],
+                "is_custom": false
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/routines"))
+        .and(query_param("page", "1"))
+        .and(query_param("pageSize", "10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "page": 1,
+            "page_count": 1,
+            "routines": [routine_json("r1"), {
+                "id": "rX",
+                "title": "Leg Day",
+                "folder_id": null,
+                "updated_at": "2026-04-20T09:00:00Z",
+                "created_at": "2026-04-20T08:00:00Z",
+                "exercises": []
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+
+    // "bench" hits e1 (page 1) and e2 (page 2), not the overhead press.
+    let search = assert_json_success(run_cli(&mock_server, &["templates", "search", "bench"]));
+    assert_eq!(search["templates_scanned"], 3);
+    assert_eq!(search["matches"].as_array().unwrap().len(), 2);
+
+    // Muscle filter narrows to chest only (still both hits).
+    let filtered = assert_json_success(run_cli(
+        &mock_server,
+        &["templates", "search", "press", "--muscle-group", "chest"],
+    ));
+    assert_eq!(filtered["matches"].as_array().unwrap().len(), 2);
+
+    // Empty query is an explicit error, not an unbounded dump.
+    assert!(!run_cli(&mock_server, &["templates", "search", ""])
+        .status
+        .success());
+    assert!(!run_cli(&mock_server, &["templates", "search", "   "])
+        .status
+        .success());
+
+    // Routine search matches titles case-insensitively, compact output.
+    let rsearch = assert_json_success(run_cli(&mock_server, &["routines", "search", "push"]));
+    assert_eq!(rsearch["routines"][0]["id"], "r1");
+    assert_eq!(rsearch["routines"][0]["exercise_count"], 0);
+    assert_eq!(rsearch["routines_scanned"], 2);
+
+    // No query: all routines, bounded by --limit.
+    let rall = assert_json_success(run_cli(
+        &mock_server,
+        &["routines", "search", "--limit", "1"],
+    ));
+    assert_eq!(rall["routines"].as_array().unwrap().len(), 1);
+    assert!(
+        !run_cli(&mock_server, &["routines", "search", "--limit", "0"])
+            .status
+            .success()
+    );
+    assert!(
+        !run_cli(&mock_server, &["routines", "search", "--limit", "101"])
+            .status
+            .success()
+    );
 }
