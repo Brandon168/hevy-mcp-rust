@@ -63,12 +63,36 @@ pub struct CreateWorkoutParams {
     pub workout: WorkoutInput,
 }
 
-/// Tool input: update an existing workout
+/// Tool input: update an existing workout's metadata. Omitted fields keep
+/// their current values; all exercises are preserved as-is. `is_private` is
+/// required because GET never returns it and PUT requires it.
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct UpdateWorkoutParams {
     /// The unique workout ID to update
     pub id: String,
-    pub workout: WorkoutInput,
+    /// New title (omit to keep)
+    pub title: Option<String>,
+    /// New description; explicit null clears it (omit to keep)
+    #[serde(default)]
+    pub description: Option<Option<String>>,
+    /// ISO 8601 datetime (omit to keep)
+    pub start_time: Option<String>,
+    /// ISO 8601 datetime (omit to keep)
+    pub end_time: Option<String>,
+    /// Privacy setting — required, no default
+    pub is_private: bool,
+}
+
+/// Tool input: replace all exercises and sets on a workout. Metadata is read
+/// from the current workout and preserved; `is_private` is still required
+/// and is updated with the request.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct ReplaceWorkoutExercisesParams {
+    /// The unique workout ID to update
+    pub id: String,
+    /// Privacy setting — required, applied to the workout
+    pub is_private: bool,
+    pub exercises: Vec<WorkoutExerciseInput>,
 }
 
 // ─── Routine params ──────────────────────────────────────────────────────────
@@ -524,16 +548,31 @@ impl HevyTools {
 
     #[tool(
         name = "update-workout",
-        description = "Update an existing workout by ID. You can modify the title, description, start/end times, privacy setting, and exercise data. Returns the updated workout with all changes applied."
+        description = "Update workout metadata (title, description, start/end times, privacy) by ID. Omitted fields and all exercises remain unchanged. is_private is required — the API never returns it on GET and requires it on PUT. Timestamps must be strict UTC seconds (YYYY-MM-DDTHH:mm:ssZ). Use replace-workout-exercises to change sets."
     )]
     async fn update_workout(
         &self,
         params: Parameters<UpdateWorkoutParams>,
     ) -> Result<Json<Workout>, String> {
-        let payload = serde_json::json!({ "workout": params.0.workout });
         let res = self
             .client
-            .update_workout(&params.0.id, payload)
+            .update_workout_metadata(&params.0.id, &params.0)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(Json(res))
+    }
+
+    #[tool(
+        name = "replace-workout-exercises",
+        description = "Replace all exercises and sets on a workout. Title, description, and times are preserved from the current workout. is_private is required and is updated with the request."
+    )]
+    async fn replace_workout_exercises(
+        &self,
+        params: Parameters<ReplaceWorkoutExercisesParams>,
+    ) -> Result<Json<Workout>, String> {
+        let res = self
+            .client
+            .replace_workout_exercises(&params.0.id, params.0.is_private, &params.0.exercises)
             .await
             .map_err(|e| e.to_string())?;
         Ok(Json(res))
@@ -1045,13 +1084,14 @@ mod tests {
         HevyTools::new(client)
     }
 
-    /// 28 tools: the original 20 plus 4 measurements, get-user-info,
-    /// search-exercise-templates, search-routines, and get-training-summary.
+    /// 29 tools: the original 20 plus 4 measurements, get-user-info,
+    /// search-exercise-templates, search-routines, get-training-summary,
+    /// and replace-workout-exercises.
     #[tokio::test]
     async fn test_tools_list_count() {
         let tools = make_tools();
         let list = tools.tool_router.list_all();
-        assert_eq!(list.len(), 28, "Expected 28 tools, got {}", list.len());
+        assert_eq!(list.len(), 29, "Expected 29 tools, got {}", list.len());
         let resp = rmcp::model::ListToolsResult {
             tools: list,
             meta: None,
@@ -1112,6 +1152,7 @@ mod tests {
             "search-exercise-templates",
             "search-routines",
             "get-training-summary",
+            "replace-workout-exercises",
             "get-webhook-subscription",
             "create-webhook-subscription",
             "delete-webhook-subscription",
@@ -1232,6 +1273,36 @@ mod tests {
             serde_json::json!(12),
             "get-training-summary.weeks must have maximum:12; got: {}",
             ts["properties"]["weeks"]
+        );
+
+        // ── update-workout is a metadata patch: is_private required ─────────
+        let uw = &schema_map["update-workout"];
+        assert!(
+            uw["properties"]["is_private"].is_object(),
+            "update-workout schema missing required `is_private`: {uw}"
+        );
+        assert!(
+            uw["required"]
+                .as_array()
+                .map_or(false, |r| r.contains(&serde_json::json!("is_private"))),
+            "update-workout.is_private must be required: {uw}"
+        );
+        // exercises must NOT be a direct property (that's replace's job)
+        assert!(
+            uw["properties"].get("exercises").is_none()
+                && uw["properties"].get("workout").is_none(),
+            "update-workout must not accept exercises/workout blobs: {uw}"
+        );
+
+        // ── replace-workout-exercises takes is_private + exercises ──────────
+        let rw = &schema_map["replace-workout-exercises"];
+        assert!(
+            rw["properties"]["exercises"].is_object(),
+            "replace-workout-exercises schema missing `exercises`: {rw}"
+        );
+        assert!(
+            rw["properties"]["is_private"].is_object(),
+            "replace-workout-exercises schema missing `is_private`: {rw}"
         );
 
         println!("All tool schema checks passed!");

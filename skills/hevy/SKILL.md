@@ -70,7 +70,8 @@ Write commands require `--confirm`. Do not add it until the user has clearly ask
 
 ```bash
 hevy-cli workouts create --input workout.json --confirm
-hevy-cli workouts update --id <workout_id> --input workout.json --confirm
+hevy-cli workouts update --id <workout_id> --title "New title" --is-private true --confirm
+hevy-cli workouts replace-exercises --id <workout_id> --is-private false --input exercises.json --confirm
 hevy-cli routines create --input routine.json --confirm
 hevy-cli routines update --id <routine_id> --input routine.json --confirm
 hevy-cli folders create --title "New Folder" --confirm
@@ -90,7 +91,7 @@ hevy-cli measurements create --date 2026-04-21 --input measurement.json --confir
 hevy-cli measurements update --date 2026-04-22 --input patch.json --confirm
 ```
 
-`--input -` reads JSON from stdin. JSON payloads may be either the raw object or the Hevy API wrapper object, such as `{ "workout": ... }`, `{ "routine": ... }`, or `{ "exercise": ... }` (the `exercise` key matches Hevy's create-template envelope).
+`--input -` reads JSON from stdin. JSON payloads may be either the raw object or the Hevy API wrapper object, such as `{ "workout": ... }`, `{ "routine": ... }`, or `{ "exercise": ... }` (the `exercise` key matches Hevy's create-template envelope). Exception: `workouts update` takes metadata as flags (not `--input`), and `workouts replace-exercises` takes an exercise array or `{ "exercises": [...] }` wrapper.
 
 ## Agent Workflow
 

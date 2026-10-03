@@ -66,7 +66,54 @@ enum WorkoutsSubcommand {
     Count,
     Events(EventsArgs),
     Create(InputConfirmArgs),
-    Update(UpdateInputConfirmArgs),
+    /// Patch metadata only (title/description/times/is_private). Exercises
+    /// are preserved. --is-private takes true/false (default false).
+    Update(WorkoutUpdateArgs),
+    /// Replace all exercises and sets. Metadata is preserved. --is-private
+    /// takes true/false (default false) and is applied.
+    ReplaceExercises(WorkoutReplaceArgs),
+}
+
+#[derive(Args)]
+struct WorkoutUpdateArgs {
+    #[arg(long)]
+    id: String,
+    #[arg(long)]
+    title: Option<String>,
+    /// New description; pass --clear-description to wipe it.
+    #[arg(long)]
+    description: Option<String>,
+    #[arg(long)]
+    clear_description: bool,
+    /// Strict UTC seconds (YYYY-MM-DDTHH:mm:ssZ).
+    #[arg(long = "start-time")]
+    start_time: Option<String>,
+    /// Strict UTC seconds (YYYY-MM-DDTHH:mm:ssZ).
+    #[arg(long = "end-time")]
+    end_time: Option<String>,
+    /// Privacy setting, applied on PUT. The MCP tool requires it with no
+    /// default because GET never returns the current value — passing it
+    /// explicitly is the point. CLI form is --is-private/--no-is-private
+    /// (default public).
+    #[arg(long = "is-private", action = clap::ArgAction::Set, default_value_t = false)]
+    is_private: bool,
+    #[arg(long)]
+    confirm: bool,
+}
+
+#[derive(Args)]
+struct WorkoutReplaceArgs {
+    #[arg(long)]
+    id: String,
+    /// Privacy setting, applied on PUT (default public).
+    #[arg(long = "is-private", action = clap::ArgAction::Set, default_value_t = false)]
+    is_private: bool,
+    /// JSON file path, or '-' for stdin: array of exercises, or a
+    /// {"exercises": [...]} / {"workout": {"exercises": [...]}} wrapper.
+    #[arg(long)]
+    input: String,
+    #[arg(long)]
+    confirm: bool,
 }
 
 #[derive(Args)]
@@ -388,8 +435,46 @@ async fn handle_workouts(client: &HevyClient, command: WorkoutsSubcommand) -> Re
         }
         WorkoutsSubcommand::Update(args) => {
             require_confirm(args.confirm)?;
-            let payload = read_wrapped_input(&args.input, "workout")?;
-            to_value(client.update_workout(&args.id, payload).await)
+            if args.clear_description && args.description.is_some() {
+                bail!("--description and --clear-description are mutually exclusive");
+            }
+            let id = args.id.clone();
+            let patch = hevy_mcp::tools::UpdateWorkoutParams {
+                id,
+                title: args.title,
+                description: match (args.description, args.clear_description) {
+                    (Some(d), false) => Some(Some(d)),
+                    (None, true) => Some(None),
+                    (None, false) => None,
+                    (Some(_), true) => unreachable!("checked above"),
+                },
+                start_time: args.start_time,
+                end_time: args.end_time,
+                is_private: args.is_private,
+            };
+            to_value(
+                client
+                    .update_workout_metadata(&patch.id.clone(), &patch)
+                    .await,
+            )
+        }
+        WorkoutsSubcommand::ReplaceExercises(args) => {
+            require_confirm(args.confirm)?;
+            let value = read_json_input(&args.input)?;
+            let exercises_value = value
+                .get("exercises")
+                .or_else(|| value.get("workout").and_then(|w| w.get("exercises")))
+                .unwrap_or(&value)
+                .clone();
+            let exercises: Vec<hevy_mcp::types::WorkoutExerciseInput> = serde_json::from_value(
+                exercises_value,
+            )
+            .context("input must be an exercise array (or {\"exercises\": [...]} wrapper)")?;
+            to_value(
+                client
+                    .replace_workout_exercises(&args.id, args.is_private, &exercises)
+                    .await,
+            )
         }
     }
 }

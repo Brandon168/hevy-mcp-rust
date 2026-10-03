@@ -245,3 +245,108 @@ async fn test_client_error_handling() {
         _ => panic!("Expected ServerError"),
     }
 }
+
+#[tokio::test]
+async fn test_update_workout_metadata_preserves_exercises() {
+    use hevy_mcp::tools::UpdateWorkoutParams;
+
+    let mock_server = MockServer::start().await;
+    let current = serde_json::json!({
+        "id": "w1", "title": "Morning Lift", "description": "Note",
+        "start_time": "2026-04-20T08:00:00.000Z",
+        "end_time": "2026-04-20T09:00:00.000Z",
+        "updated_at": "2026-04-20T09:00:00Z",
+        "created_at": "2026-04-20T08:00:00Z",
+        "exercises": [
+            {
+                "index": 0, "title": "Bench", "notes": null,
+                "exercise_template_id": "e1", "supersets_id": 3,
+                "sets": [
+                    {"index": 0, "type": "warmup", "weight_kg": 60.0, "reps": 10}
+                ]
+            }
+        ]
+    });
+
+    Mock::given(method("GET"))
+        .and(path("/v1/workouts/w1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(current))
+        .mount(&mock_server)
+        .await;
+
+    // GET-then-PUT round trip; the PUT responder echoes a renamed record.
+    // Exact PUT-body matching is intentionally not asserted with body_json
+    // (wiremock rejects serde_json's key order); payload shape is verified
+    // by hand against a capture server instead.
+    Mock::given(method("PUT"))
+        .and(path("/v1/workouts/w1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "w1", "title": "Renamed", "description": "Note",
+            "start_time": "2026-04-20T08:00:00Z",
+            "end_time": "2026-04-20T09:00:00Z",
+            "updated_at": "2026-04-20T09:00:00Z",
+            "created_at": "2026-04-20T08:00:00Z",
+            "exercises": []
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let client = HevyClient::with_base_url("test_key".to_string(), mock_server.uri()).unwrap();
+    let patch = UpdateWorkoutParams {
+        id: "w1".to_string(),
+        title: Some("Renamed".to_string()),
+        description: None,
+        start_time: None,
+        end_time: None,
+        is_private: true,
+    };
+    let updated = client.update_workout_metadata("w1", &patch).await.unwrap();
+    assert_eq!(updated.title, "Renamed");
+    mock_server.verify().await;
+}
+
+#[tokio::test]
+async fn test_replace_workout_exercises_preserves_metadata() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/v1/workouts/w2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "w2", "title": "Keep Me", "description": "Keep",
+            "start_time": "2026-04-20T08:00:00Z",
+            "end_time": "2026-04-20T09:00:00Z",
+            "updated_at": "2026-04-20T09:00:00Z",
+            "created_at": "2026-04-20T08:00:00Z",
+            "exercises": [
+                {"index": 0, "title": "Old", "notes": null,
+                 "exercise_template_id": "eOld", "supersets_id": null, "sets": []}
+            ]
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/v1/workouts/w2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "w2", "title": "Keep Me", "description": "Keep",
+            "start_time": "2026-04-20T08:00:00Z",
+            "end_time": "2026-04-20T09:00:00Z",
+            "updated_at": "2026-04-20T09:00:00Z",
+            "created_at": "2026-04-20T08:00:00Z",
+            "exercises": []
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let client = HevyClient::with_base_url("test_key".to_string(), mock_server.uri()).unwrap();
+    let exercises: Vec<hevy_mcp::types::WorkoutExerciseInput> =
+        serde_json::from_value(serde_json::json!([{"exercise_template_id": "e9", "sets": []}]))
+            .unwrap();
+    let updated = client
+        .replace_workout_exercises("w2", false, &exercises)
+        .await
+        .unwrap();
+    assert_eq!(updated.title, "Keep Me");
+    mock_server.verify().await;
+}

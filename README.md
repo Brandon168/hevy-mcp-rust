@@ -235,7 +235,8 @@ transport (such as **LobeChat**, **LibreChat**, or **IDE plugins**):
 | `get-workout-count`  | Total number of workouts on account                 |
 | `get-workout-events` | Paginated workout update/delete events since a date |
 | `create-workout`     | Log a new workout with exercises and sets           |
-| `update-workout`     | Modify an existing workout                          |
+| `update-workout`     | Patch metadata only; exercises preserved (is_private required) |
+| `replace-workout-exercises` | Replace all exercises/sets; metadata preserved (is_private required) |
 
 ### Measurement Tools
 

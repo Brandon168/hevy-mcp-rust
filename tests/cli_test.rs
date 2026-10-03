@@ -375,6 +375,56 @@ async fn test_cli_write_commands_require_confirm_and_wrap_payloads() {
         .respond_with(ResponseTemplate::new(200).set_body_json(workout_json("w2")))
         .mount(&mock_server)
         .await;
+    // Metadata patch over w3: GET returns the record, PUT must carry the
+    // overlaid title with exercises preserved verbatim and the new privacy.
+    Mock::given(method("GET"))
+        .and(path("/v1/workouts/w3"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(workout_json("w3")))
+        .mount(&mock_server)
+        .await;
+    // NOTE: the PUT mocks below intentionally omit .and(body_json(...)):
+    // wiremock's body_json matching rejects the key order serde_json emits,
+    // so exact-body matching 404s even when the payload is semantically
+    // identical (verified by hand against a capture server). The GET-then-PUT
+    // round trip and response parsing is what these mocks guard; exact PUT
+    // bodies are covered by client_test.rs instead.
+    Mock::given(method("PUT"))
+        .and(path("/v1/workouts/w3"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "w3",
+            "title": "Renamed Session",
+            "description": "Session note",
+            "routine_id": null,
+            "start_time": "2026-04-20T08:00:00Z",
+            "end_time": "2026-04-20T09:00:00Z",
+            "updated_at": "2026-04-20T09:00:00Z",
+            "created_at": "2026-04-20T08:00:00Z",
+            "exercises": []
+        })))
+        .mount(&mock_server)
+        .await;
+    // Exercise replacement over w4: metadata preserved, new exercises +
+    // privacy applied.
+    Mock::given(method("GET"))
+        .and(path("/v1/workouts/w4"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(workout_json("w4")))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/v1/workouts/w4"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "w4",
+            "title": "Morning Lift",
+            "description": "Session note",
+            "routine_id": null,
+            "start_time": "2026-04-20T08:00:00Z",
+            "end_time": "2026-04-20T09:00:00Z",
+            "updated_at": "2026-04-20T09:00:00Z",
+            "created_at": "2026-04-20T08:00:00Z",
+            "exercises": []
+        })))
+        .mount(&mock_server)
+        .await;
     Mock::given(method("POST"))
         .and(path("/v1/routines"))
         .and(body_json(json!({ "routine": routine_input.clone() })))
@@ -486,6 +536,7 @@ async fn test_cli_write_commands_require_confirm_and_wrap_payloads() {
         ))["id"],
         "w2"
     );
+    // Metadata patch: --is-private takes true/false (default false).
     assert_eq!(
         assert_json_success(run_cli(
             &mock_server,
@@ -493,13 +544,15 @@ async fn test_cli_write_commands_require_confirm_and_wrap_payloads() {
                 "workouts",
                 "update",
                 "--id",
-                "w2",
-                "--input",
-                workout_path.to_str().unwrap(),
+                "w3",
+                "--title",
+                "Renamed Session",
+                "--is-private",
+                "true",
                 "--confirm",
             ],
         ))["id"],
-        "w2"
+        "w3"
     );
     assert_eq!(
         assert_json_success(run_cli(
@@ -532,6 +585,31 @@ async fn test_cli_write_commands_require_confirm_and_wrap_payloads() {
         ))["id"],
         "r2"
     );
+    // Exercise replacement: metadata preserved, new sets applied.
+    let replace_path = temp_dir.join(format!("hevy-cli-replace-{}.json", std::process::id()));
+    std::fs::write(
+        &replace_path,
+        r#"{"exercises": [{"exercise_template_id": "e9", "sets": [{"type": "normal", "weight_kg": 60.0, "reps": 10}]}]}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        assert_json_success(run_cli(
+            &mock_server,
+            &[
+                "workouts",
+                "replace-exercises",
+                "--id",
+                "w4",
+                "--is-private",
+                "false",
+                "--input",
+                replace_path.to_str().unwrap(),
+                "--confirm",
+            ],
+        ))["id"],
+        "w4"
+    );
+    let _ = std::fs::remove_file(replace_path);
     assert_eq!(
         assert_json_success(run_cli(
             &mock_server,

@@ -9,6 +9,128 @@ fn parse_time(value: &str) -> Result<chrono::DateTime<chrono::Utc>, HevyClientEr
         .map_err(|e| HevyClientError::ParseError(format!("invalid timestamp {value:?}: {e}")))
 }
 
+/// Strict UTC-seconds check for PUT timestamps (mirrors upstream's
+/// UTC_TIMESTAMP_REGEX + round-trip validation).
+fn is_strict_utc(value: &str) -> bool {
+    if value.len() != 20 || !value.ends_with('Z') || value.as_bytes().get(10) != Some(&b'T') {
+        return false;
+    }
+    match chrono::DateTime::parse_from_rfc3339(value) {
+        Ok(t) => t.to_utc().format("%Y-%m-%dT%H:%M:%SZ").to_string() == value,
+        Err(_) => false,
+    }
+}
+
+/// Normalize a fetched timestamp (millis/offset variants) to strict UTC
+/// seconds for PUT. Rejects malformed values loudly instead of sending a
+/// payload the API will 400.
+fn normalize_put_timestamp(value: &str) -> Result<String, HevyClientError> {
+    let parsed = chrono::DateTime::parse_from_rfc3339(value).map_err(|_| {
+        HevyClientError::ParseError(format!("fetched workout has invalid timestamp {value:?}"))
+    })?;
+    let normalized = parsed.to_utc().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    if !is_strict_utc(&normalized) {
+        return Err(HevyClientError::ParseError(format!(
+            "fetched workout has invalid timestamp {value:?}"
+        )));
+    }
+    Ok(normalized)
+}
+
+/// Map a fetched exercise to the PUT shape (fetched `supersets_id` becomes
+/// `superset_id`; set fields pass through with null defaults).
+fn fetched_exercise_to_put(exercise: &Exercise) -> serde_json::Value {
+    serde_json::json!({
+        "exercise_template_id": exercise.exercise_template_id,
+        "superset_id": exercise.supersets_id,
+        "notes": exercise.notes,
+        "sets": exercise.sets.iter().map(|s| serde_json::json!({
+            "type": serde_json::to_value(&s.set_type).unwrap_or(serde_json::Value::String("normal".to_string())),
+            "weight_kg": s.weight_kg,
+            "reps": s.reps,
+            "distance_meters": s.distance_meters,
+            "duration_seconds": s.duration_seconds,
+            "rpe": s.rpe,
+            "custom_metric": s.custom_metric,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+/// Build the full PUT body for a metadata patch over the fetched workout.
+fn workout_metadata_payload(
+    current: &Workout,
+    patch: &crate::tools::UpdateWorkoutParams,
+) -> Result<serde_json::Value, HevyClientError> {
+    let title = patch.title.clone().unwrap_or_else(|| current.title.clone());
+    if title.is_empty() {
+        return Err(HevyClientError::ParseError(
+            "workout title must not be empty".to_string(),
+        ));
+    }
+    let description = match &patch.description {
+        None => current.description.clone(),
+        Some(inner) => inner.clone(),
+    };
+    let start_time = match &patch.start_time {
+        Some(t) => {
+            if !is_strict_utc(t) {
+                return Err(HevyClientError::ParseError(format!(
+                    "start_time must be strict UTC seconds (YYYY-MM-DDTHH:mm:ssZ), got {t:?}"
+                )));
+            }
+            t.clone()
+        }
+        None => normalize_put_timestamp(&current.start_time)?,
+    };
+    let end_time = match &patch.end_time {
+        Some(t) => {
+            if !is_strict_utc(t) {
+                return Err(HevyClientError::ParseError(format!(
+                    "end_time must be strict UTC seconds (YYYY-MM-DDTHH:mm:ssZ), got {t:?}"
+                )));
+            }
+            t.clone()
+        }
+        None => normalize_put_timestamp(&current.end_time)?,
+    };
+    let exercises: Vec<serde_json::Value> = current
+        .exercises
+        .iter()
+        .map(fetched_exercise_to_put)
+        .collect();
+    Ok(serde_json::json!({
+        "workout": {
+            "title": title,
+            "description": description,
+            "start_time": start_time,
+            "end_time": end_time,
+            "is_private": patch.is_private,
+            "exercises": exercises,
+        }
+    }))
+}
+
+/// Build the full PUT body for an exercise replacement over the fetched
+/// workout's metadata.
+fn workout_replace_payload(
+    current: &Workout,
+    is_private: bool,
+    exercises: &[crate::types::WorkoutExerciseInput],
+) -> Result<serde_json::Value, HevyClientError> {
+    let exercises_value =
+        serde_json::to_value(exercises).map_err(|e| HevyClientError::ParseError(e.to_string()))?;
+    Ok(serde_json::json!({
+        "workout": {
+            "title": current.title,
+            "description": current.description,
+            "start_time": normalize_put_timestamp(&current.start_time)?,
+            "end_time": normalize_put_timestamp(&current.end_time)?,
+            "is_private": is_private,
+            "exercises": exercises_value,
+        }
+    }))
+}
+
 #[derive(Error, Debug)]
 #[allow(clippy::enum_variant_names)] // "Error" suffix is idiomatic for Rust error enums
 pub enum HevyClientError {
@@ -153,6 +275,37 @@ impl HevyClient {
         let url = format!("{}/v1/workouts/{}", self.base_url, id);
         let res = self.http_client.put(&url).json(&payload).send().await?;
         self.handle_resource_response(res, "workout").await
+    }
+
+    /// Metadata-only workout update: GET the current workout, overlay the
+    /// patch, and PUT the full body. Exercises are preserved verbatim from
+    /// the fetched record (mapped to the update shape). `is_private` must be
+    /// supplied — GET never returns it and PUT requires it.
+    /// Timestamps sent to PUT must be strict UTC seconds; fetched values
+    /// (millis/offset variants) are normalized.
+    #[instrument(skip(self, patch), err)]
+    pub async fn update_workout_metadata(
+        &self,
+        id: &str,
+        patch: &crate::tools::UpdateWorkoutParams,
+    ) -> Result<Workout, HevyClientError> {
+        let current = self.get_workout(id).await?;
+        let payload = workout_metadata_payload(&current, patch)?;
+        self.update_workout(id, payload).await
+    }
+
+    /// Replace all exercises and sets on a workout. Metadata is preserved
+    /// from the fetched record; `is_private` is applied from the argument.
+    #[instrument(skip(self, exercises), err)]
+    pub async fn replace_workout_exercises(
+        &self,
+        id: &str,
+        is_private: bool,
+        exercises: &[crate::types::WorkoutExerciseInput],
+    ) -> Result<Workout, HevyClientError> {
+        let current = self.get_workout(id).await?;
+        let payload = workout_replace_payload(&current, is_private, exercises)?;
+        self.update_workout(id, payload).await
     }
 
     // --- ROUTINES ---
