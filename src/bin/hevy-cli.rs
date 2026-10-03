@@ -325,7 +325,11 @@ async fn handle_routines(client: &HevyClient, command: RoutinesSubcommand) -> Re
         RoutinesSubcommand::Update(args) => {
             require_confirm(args.confirm)?;
             let payload = read_wrapped_input(&args.input, "routine")?;
-            to_value(client.update_routine(&args.id, payload).await)
+            to_value(
+                client
+                    .update_routine(&args.id, strip_routine_folder_id(payload))
+                    .await,
+            )
         }
     }
 }
@@ -352,7 +356,7 @@ async fn handle_templates(client: &HevyClient, command: TemplatesSubcommand) -> 
         TemplatesSubcommand::Get(args) => to_value(client.get_template(&args.id).await),
         TemplatesSubcommand::Create(args) => {
             require_confirm(args.confirm)?;
-            let payload = read_wrapped_input(&args.input, "exercise_template")?;
+            let payload = read_wrapped_input(&args.input, "exercise")?;
             client
                 .create_exercise_template(payload)
                 .await
@@ -482,6 +486,24 @@ fn read_wrapped_input(input: &str, key: &str) -> Result<Value> {
     } else {
         Ok(json!({ key: value }))
     }
+}
+
+/// Hevy's routine PUT body has no `folder_id` (routines cannot be moved
+/// between folders on update). Drop it with a loud warning rather than
+/// silently sending a field the API ignores (or rejects).
+fn strip_routine_folder_id(mut payload: Value) -> Value {
+    if payload
+        .get_mut("routine")
+        .and_then(|r| r.as_object_mut())
+        .map(|r| r.remove("folder_id"))
+        .is_some()
+    {
+        eprintln!(
+            "warning: ignoring folder_id in routine update payload — \
+             the Hevy API has no folder_id on PUT /v1/routines/{{id}}"
+        );
+    }
+    payload
 }
 
 fn read_json_input(input: &str) -> Result<Value> {

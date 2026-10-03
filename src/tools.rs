@@ -86,6 +86,8 @@ pub struct CreateRoutineParams {
     pub title: String,
     /// Optional folder ID to assign the routine to
     pub folder_id: Option<i32>,
+    /// Optional routine notes
+    pub notes: Option<String>,
     pub exercises: Vec<RoutineExerciseInput>,
 }
 
@@ -96,8 +98,9 @@ pub struct UpdateRoutineParams {
     pub id: String,
     /// Routine title
     pub title: String,
-    /// Optional folder ID to assign the routine to
-    pub folder_id: Option<i32>,
+    /// Optional routine notes. Hevy's update endpoint has no `folder_id`:
+    /// routines cannot be moved between folders on update.
+    pub notes: Option<String>,
     pub exercises: Vec<RoutineExerciseInput>,
 }
 
@@ -389,6 +392,7 @@ impl HevyTools {
             "routine": {
                 "title": params.0.title,
                 "folder_id": params.0.folder_id,
+                "notes": params.0.notes,
                 "exercises": params.0.exercises,
             }
         });
@@ -402,7 +406,7 @@ impl HevyTools {
 
     #[tool(
         name = "update-routine",
-        description = "Update an existing routine by ID. You can modify the title, notes, and exercise configurations. Returns the updated routine with all changes applied."
+        description = "Update an existing routine by ID. You can modify the title, notes, and exercise configurations. Returns the updated routine with all changes applied. Note: routines cannot be moved between folders on update (Hevy's API accepts no folder_id here)."
     )]
     async fn update_routine(
         &self,
@@ -411,7 +415,7 @@ impl HevyTools {
         let payload = serde_json::json!({
             "routine": {
                 "title": params.0.title,
-                "folder_id": params.0.folder_id,
+                "notes": params.0.notes,
                 "exercises": params.0.exercises,
             }
         });
@@ -542,12 +546,12 @@ impl HevyTools {
         params: Parameters<CreateExerciseTemplateParams>,
     ) -> Result<Json<ExerciseTemplateResponse>, String> {
         let payload = serde_json::json!({
-            "exercise_template": {
+            "exercise": {
                 "title": params.0.title,
-                "type": params.0.exercise_type,
+                "exercise_type": params.0.exercise_type,
                 "equipment_category": params.0.equipment_category,
-                "primary_muscle_group": params.0.muscle_group,
-                "secondary_muscle_groups": params.0.other_muscles,
+                "muscle_group": params.0.muscle_group,
+                "other_muscles": params.0.other_muscles,
             }
         });
         let res = self

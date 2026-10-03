@@ -273,10 +273,16 @@ async fn test_cli_write_commands_require_confirm_and_wrap_payloads() {
     });
     let template_input = json!({
         "title": "Custom Press",
-        "type": "weight_reps",
+        "exercise_type": "weight_reps",
         "equipment_category": "barbell",
-        "primary_muscle_group": "chest",
-        "secondary_muscle_groups": []
+        "muscle_group": "chest",
+        "other_muscles": []
+    });
+    // PUT /v1/routines/{id} has no folder_id; the CLI must strip it (see
+    // strip_routine_folder_id) so this mock asserts the exact stripped body.
+    let routine_update_sent = json!({
+        "title": "Push Day",
+        "exercises": []
     });
 
     Mock::given(method("POST"))
@@ -298,6 +304,7 @@ async fn test_cli_write_commands_require_confirm_and_wrap_payloads() {
         .await;
     Mock::given(method("PUT"))
         .and(path("/v1/routines/r2"))
+        .and(body_json(json!({ "routine": routine_update_sent })))
         .respond_with(ResponseTemplate::new(200).set_body_json(routine_json("r2")))
         .mount(&mock_server)
         .await;
@@ -311,9 +318,7 @@ async fn test_cli_write_commands_require_confirm_and_wrap_payloads() {
         .await;
     Mock::given(method("POST"))
         .and(path("/v1/exercise_templates"))
-        .and(body_json(
-            json!({ "exercise_template": template_input.clone() }),
-        ))
+        .and(body_json(json!({ "exercise": template_input.clone() })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "exercise_template": template_json("e2")
         })))
@@ -398,6 +403,9 @@ async fn test_cli_write_commands_require_confirm_and_wrap_payloads() {
         ))["id"],
         "r2"
     );
+    // Same input file carries folder_id (valid on create) but the update
+    // mock above only matches the stripped body — this call fails loudly
+    // if folder_id leaks through.
     assert_eq!(
         assert_json_success(run_cli(
             &mock_server,

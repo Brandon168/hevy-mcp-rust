@@ -69,7 +69,7 @@ hevy-cli webhooks create --url https://example.com/hevy --confirm
 hevy-cli webhooks delete --confirm
 ```
 
-`--input -` reads JSON from stdin. JSON payloads may be either the raw object or the Hevy API wrapper object, such as `{ "workout": ... }`, `{ "routine": ... }`, or `{ "exercise_template": ... }`.
+`--input -` reads JSON from stdin. JSON payloads may be either the raw object or the Hevy API wrapper object, such as `{ "workout": ... }`, `{ "routine": ... }`, or `{ "exercise": ... }` (the `exercise` key matches Hevy's create-template envelope).
 
 ## Agent Workflow
 
