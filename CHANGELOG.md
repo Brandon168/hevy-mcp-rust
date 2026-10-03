@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-10-03
+
+### Added
+
+- Body measurements: `get-body-measurements`, `get-body-measurement`,
+  `create-body-measurement`, `update-body-measurement` MCP tools plus a
+  `hevy-cli measurements` group (patch-over-PUT merge, explicit nulls
+  dropped with a warning) and `get-user-info` / `hevy-cli user info`.
+- Search: `search-exercise-templates` (title substring + muscle filter, full
+  catalog scan) and `search-routines` (compact hits, limit 1–100) MCP tools
+  plus `hevy-cli templates search` and `hevy-cli routines search`.
+- Training summary: `get-training-summary` (weeks 1–12) and
+  `hevy-cli summary --weeks` (1–520) sharing one client-side aggregation
+  (volume, sessions, measurement endpoints, weight change).
+- `replace-workout-exercises` MCP tool; `update-workout` is now a
+  metadata-only patch (exercises preserved, `is_private` required).
+  CLI mirrors with flag-based `workouts update` and
+  `workouts replace-exercises`.
+- Tool count 20 → 29.
+
+### Fixed
+
+- `create-exercise-template` now sends the spec's `{"exercise": ...}`
+  envelope (was a wrong `exercise_template` envelope that the API rejects).
+- `update-routine` no longer sends `folder_id` (PUT has no such field);
+  added `notes` to create/update routine params.
+- Synced the vendored `openapi-spec.json` with upstream (adds
+  `body_measurements` and `user/info` paths).
+
 ## [0.1.3] - 2026-04-28
 
 ### Added
