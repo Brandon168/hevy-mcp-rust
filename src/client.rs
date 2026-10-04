@@ -149,8 +149,6 @@ pub enum HevyClientError {
 /// A client for the Hevy API.
 #[derive(Clone, Debug)]
 pub struct HevyClient {
-    #[allow(dead_code)] // stored for potential debug/introspection; key is set in HTTP headers
-    pub api_key: String,
     pub http_client: Client,
     pub base_url: String,
 }
@@ -173,7 +171,6 @@ impl HevyClient {
         let http_client = Client::builder().default_headers(headers).build()?;
 
         Ok(Self {
-            api_key,
             http_client,
             base_url,
         })
@@ -698,5 +695,78 @@ impl HevyClient {
             let message = res.text().await.unwrap_or_default();
             Err(HevyClientError::ServerError { status, message })
         }
+    }
+
+    /// Scan the whole template catalog for a case-insensitive title substring,
+    /// optionally restricted to one primary muscle group. Returns hits and the
+    /// number of templates scanned.
+    pub async fn search_templates(
+        &self,
+        query: &str,
+        muscle_group: Option<&str>,
+    ) -> Result<(Vec<ExerciseTemplate>, usize), HevyClientError> {
+        let needle = query.to_lowercase();
+        let mut matches = Vec::new();
+        let mut scanned = 0usize;
+        let mut page = 1u32;
+        loop {
+            let list = self.get_templates(page, 100).await?;
+            scanned += list.exercise_templates.len();
+            let page_count = list.page_count;
+            let empty = list.exercise_templates.is_empty();
+            matches.extend(list.exercise_templates.into_iter().filter(|t| {
+                t.title.to_lowercase().contains(&needle)
+                    && muscle_group.is_none_or(|m| t.primary_muscle_group.eq_ignore_ascii_case(m))
+            }));
+            if page >= page_count as u32 || empty {
+                break;
+            }
+            page += 1;
+        }
+        Ok((matches, scanned))
+    }
+
+    /// Scan routines for a case-insensitive title substring (blank matches
+    /// all), stopping after `limit` hits. Returns hits and routines scanned.
+    pub async fn search_routines(
+        &self,
+        query: Option<&str>,
+        limit: usize,
+    ) -> Result<(Vec<RoutineSummary>, usize), HevyClientError> {
+        let needle = query
+            .map(str::to_lowercase)
+            .filter(|q| !q.trim().is_empty());
+        let mut routines = Vec::new();
+        let mut scanned = 0usize;
+        let mut page = 1u32;
+        'pages: loop {
+            let list = self.get_routines(page, 10).await?;
+            scanned += list.routines.len();
+            let page_count = list.page_count;
+            let empty = list.routines.is_empty();
+            for r in list.routines {
+                if needle
+                    .as_ref()
+                    .is_none_or(|q| r.title.to_lowercase().contains(q))
+                {
+                    routines.push(RoutineSummary {
+                        id: r.id,
+                        title: r.title,
+                        folder_id: r.folder_id,
+                        updated_at: r.updated_at,
+                        exercise_count: r.exercises.len(),
+                        set_count: r.exercises.iter().map(|e| e.sets.len()).sum(),
+                    });
+                    if routines.len() >= limit {
+                        break 'pages;
+                    }
+                }
+            }
+            if page >= page_count as u32 || empty {
+                break;
+            }
+            page += 1;
+        }
+        Ok((routines, scanned))
     }
 }

@@ -142,7 +142,6 @@ async fn test_streamable_http_startup() {
 
 #[tokio::test]
 async fn test_streamable_mcp_full_listing() {
-    use bytes::Bytes;
     use futures::StreamExt;
 
     let port = {
@@ -272,7 +271,7 @@ async fn test_streamable_mcp_full_listing() {
         let mut buffer = String::new();
         let mut found = false;
         while let Some(chunk_result) = stream.next().await {
-            let chunk: Bytes = chunk_result.expect("stream error");
+            let chunk = chunk_result.expect("stream error");
             let chunk_str = String::from_utf8_lossy(&chunk);
             buffer.push_str(&chunk_str);
 
@@ -330,7 +329,7 @@ async fn test_streamable_mcp_full_listing() {
         let mut buffer = String::new();
         let mut found = false;
         while let Some(chunk_result) = stream.next().await {
-            let chunk: Bytes = chunk_result.expect("stream error");
+            let chunk = chunk_result.expect("stream error");
             let chunk_str = String::from_utf8_lossy(&chunk);
             buffer.push_str(&chunk_str);
 

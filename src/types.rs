@@ -212,15 +212,6 @@ pub struct UserInfo {
     pub url: String,
 }
 
-/// Mirrors Hevy's webhook object shape (kept for documentation; tool responses use WebhookResponse)
-#[allow(dead_code)]
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
-pub struct Webhook {
-    pub id: Option<String>,
-    pub url: String,
-    pub events: Vec<String>,
-}
-
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 pub struct WorkoutListSchema {
     pub page: i32,
@@ -249,13 +240,6 @@ pub struct TemplateListSchema {
     pub page: i32,
     pub page_count: i32,
     pub exercise_templates: Vec<ExerciseTemplate>,
-}
-
-/// Mirrors Hevy's webhook list shape (kept for documentation; not currently used by tools)
-#[allow(dead_code)]
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
-pub struct WebhookListSchema {
-    pub webhooks: Vec<Webhook>,
 }
 
 /// Input types for typed parameters
@@ -316,4 +300,15 @@ pub struct RoutineSetInput {
     pub duration_seconds: Option<i32>,
     pub rpe: Option<f64>,
     pub custom_metric: Option<f64>,
+}
+
+/// Compact routine hit: metadata only, no exercises
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+pub struct RoutineSummary {
+    pub id: String,
+    pub title: String,
+    pub folder_id: Option<i32>,
+    pub updated_at: String,
+    pub exercise_count: usize,
+    pub set_count: usize,
 }

@@ -503,42 +503,9 @@ async fn handle_routines(client: &HevyClient, command: RoutinesSubcommand) -> Re
             if args.limit == 0 || args.limit > 100 {
                 bail!("--limit must be between 1 and 100");
             }
-            let needle = args
-                .query
-                .as_deref()
-                .map(str::to_lowercase)
-                .filter(|q| !q.trim().is_empty());
-            let mut routines = Vec::new();
-            let mut scanned = 0usize;
-            let mut page = 1u32;
-            'pages: loop {
-                let list = client.get_routines(page, 10).await?;
-                scanned += list.routines.len();
-                let page_count = list.page_count;
-                let empty = list.routines.is_empty();
-                for r in list.routines {
-                    if needle
-                        .as_ref()
-                        .map_or(true, |q| r.title.to_lowercase().contains(q))
-                    {
-                        routines.push(json!({
-                            "id": r.id,
-                            "title": r.title,
-                            "folder_id": r.folder_id,
-                            "updated_at": r.updated_at,
-                            "exercise_count": r.exercises.len(),
-                            "set_count": r.exercises.iter().map(|e| e.sets.len()).sum::<usize>(),
-                        }));
-                        if routines.len() >= args.limit as usize {
-                            break 'pages;
-                        }
-                    }
-                }
-                if page >= page_count as u32 || empty {
-                    break;
-                }
-                page += 1;
-            }
+            let (routines, scanned) = client
+                .search_routines(args.query.as_deref(), args.limit as usize)
+                .await?;
             Ok(json!({
                 "query": args.query,
                 "routines": routines,
@@ -581,31 +548,9 @@ async fn handle_templates(client: &HevyClient, command: TemplatesSubcommand) -> 
             if needle.trim().is_empty() {
                 bail!("query must not be empty");
             }
-            let mut matches = Vec::new();
-            let mut scanned = 0usize;
-            let mut page = 1u32;
-            loop {
-                let list = client.get_templates(page, 100).await?;
-                scanned += list.exercise_templates.len();
-                let page_count = list.page_count;
-                let empty = list.exercise_templates.is_empty();
-                matches.extend(
-                    list.exercise_templates
-                        .into_iter()
-                        .filter(|t| {
-                            t.title.to_lowercase().contains(&needle)
-                                && args.muscle_group.as_ref().map_or(true, |m| {
-                                    t.primary_muscle_group.eq_ignore_ascii_case(m)
-                                })
-                        })
-                        .map(|t| serde_json::to_value(t))
-                        .collect::<Result<Vec<_>, _>>()?,
-                );
-                if page >= page_count as u32 || empty {
-                    break;
-                }
-                page += 1;
-            }
+            let (matches, scanned) = client
+                .search_templates(&args.query, args.muscle_group.as_deref())
+                .await?;
             Ok(json!({
                 "query": args.query,
                 "matches": matches,
@@ -664,7 +609,6 @@ async fn handle_measurements(
                 })?;
             let mut existing_value = serde_json::to_value(existing)?;
             let changes = read_json_input(&args.input)?;
-            normalize_measurement_input(&mut existing_value, None, false)?;
             merge_measurement_json(&mut existing_value, &changes)?;
             normalize_measurement_input(&mut existing_value, Some(&args.date), false)?;
             // PUT body is PutBodyMeasurement: date lives in the path, not the body.
@@ -712,12 +656,6 @@ fn normalize_measurement_input(
         if v.is_null() {
             eprintln!("warning: omitting null field {k} — the Hevy API rejects explicit nulls");
             return false;
-        }
-        if !v.is_number() {
-            return true; // leave for the API to reject with a clear field error
-        }
-        if !v.as_f64().is_some_and(f64::is_finite) {
-            return true;
         }
         true
     });

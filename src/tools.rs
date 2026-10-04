@@ -311,66 +311,35 @@ pub struct SearchRoutinesResponse {
     pub routines_scanned: usize,
 }
 
-/// Compact routine hit: metadata only, no exercises
-#[derive(Serialize, Deserialize, JsonSchema, Clone)]
-pub struct RoutineSummary {
-    pub id: String,
-    pub title: String,
-    pub folder_id: Option<i32>,
-    pub updated_at: String,
-    pub exercise_count: usize,
-    pub set_count: usize,
-}
-
 /// Typed response wrapper for exercise template creation
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
 pub struct ExerciseTemplateResponse {
     pub exercise_template: Option<serde_json::Value>,
 }
 
-/// Build the measurement wire object from tool input, dropping nulls the
-/// API rejects. `for_create` includes `date`; update callers merge first and
-/// send only numeric fields.
+/// Wire object for a tool input's supplied (non-null) fields; the API rejects
+/// nulls. `for_create` keeps `date`; update bodies carry it in the path only.
+fn supplied_fields(
+    value: &impl Serialize,
+    for_create: bool,
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    let serde_json::Value::Object(mut map) =
+        serde_json::to_value(value).map_err(|e| e.to_string())?
+    else {
+        unreachable!("measurements serialize to objects")
+    };
+    map.retain(|_, v| !v.is_null());
+    if !for_create {
+        map.remove("date");
+    }
+    Ok(map)
+}
+
 fn measurement_payload(
     params: &BodyMeasurementParams,
     for_create: bool,
 ) -> Result<serde_json::Value, String> {
-    let mut map = serde_json::Map::new();
-    if for_create {
-        map.insert(
-            "date".to_string(),
-            serde_json::Value::String(params.date.clone()),
-        );
-    }
-    let fields: [(&str, Option<f64>); 17] = [
-        ("weight_kg", params.weight_kg),
-        ("lean_mass_kg", params.lean_mass_kg),
-        ("fat_percent", params.fat_percent),
-        ("neck_cm", params.neck_cm),
-        ("shoulder_cm", params.shoulder_cm),
-        ("chest_cm", params.chest_cm),
-        ("left_bicep_cm", params.left_bicep_cm),
-        ("right_bicep_cm", params.right_bicep_cm),
-        ("left_forearm_cm", params.left_forearm_cm),
-        ("right_forearm_cm", params.right_forearm_cm),
-        ("abdomen", params.abdomen),
-        ("waist", params.waist),
-        ("hips", params.hips),
-        ("left_thigh", params.left_thigh),
-        ("right_thigh", params.right_thigh),
-        ("left_calf", params.left_calf),
-        ("right_calf", params.right_calf),
-    ];
-    for (key, value) in fields {
-        if let Some(v) = value {
-            map.insert(
-                key.to_string(),
-                serde_json::Number::from_f64(v)
-                    .map(serde_json::Value::Number)
-                    .ok_or_else(|| format!("{key} must be a finite number"))?,
-            );
-        }
-    }
+    let map = supplied_fields(params, for_create)?;
     if map.len() == (for_create as usize) {
         return Err("at least one numeric measurement field is required".to_string());
     }
@@ -378,35 +347,18 @@ fn measurement_payload(
 }
 
 /// Merge tool input over the existing record for PUT: supplied values win,
-/// explicit null input leaves the existing value in place (the API has no
-/// clear operation), and omitted input fields are preserved.
+/// and explicit null input (indistinguishable from omitted) keeps the
+/// existing value, since the API has no clear operation.
 fn merged_measurement_payload(
     existing: &BodyMeasurement,
     params: &BodyMeasurementParams,
 ) -> Result<serde_json::Value, String> {
-    // Explicit JSON nulls in tool input arrive as None — indistinguishable
-    // from omitted, so they preserve the existing value by construction.
-    let merged = BodyMeasurementParams {
-        date: params.date.clone(),
-        weight_kg: params.weight_kg.or(existing.weight_kg),
-        lean_mass_kg: params.lean_mass_kg.or(existing.lean_mass_kg),
-        fat_percent: params.fat_percent.or(existing.fat_percent),
-        neck_cm: params.neck_cm.or(existing.neck_cm),
-        shoulder_cm: params.shoulder_cm.or(existing.shoulder_cm),
-        chest_cm: params.chest_cm.or(existing.chest_cm),
-        left_bicep_cm: params.left_bicep_cm.or(existing.left_bicep_cm),
-        right_bicep_cm: params.right_bicep_cm.or(existing.right_bicep_cm),
-        left_forearm_cm: params.left_forearm_cm.or(existing.left_forearm_cm),
-        right_forearm_cm: params.right_forearm_cm.or(existing.right_forearm_cm),
-        abdomen: params.abdomen.or(existing.abdomen),
-        waist: params.waist.or(existing.waist),
-        hips: params.hips.or(existing.hips),
-        left_thigh: params.left_thigh.or(existing.left_thigh),
-        right_thigh: params.right_thigh.or(existing.right_thigh),
-        left_calf: params.left_calf.or(existing.left_calf),
-        right_calf: params.right_calf.or(existing.right_calf),
-    };
-    measurement_payload(&merged, false)
+    let mut merged = supplied_fields(existing, false)?;
+    merged.extend(supplied_fields(params, false)?);
+    if merged.is_empty() {
+        return Err("at least one numeric measurement field is required".to_string());
+    }
+    Ok(serde_json::Value::Object(merged))
 }
 
 /// Typed response wrapper for a single-date measurement lookup: the
@@ -756,36 +708,16 @@ impl HevyTools {
         if params.0.query.trim().is_empty() {
             return Err("query must not be empty".to_string());
         }
-        let needle = params.0.query.to_lowercase();
-        let muscle: Option<String> = params.0.primary_muscle_group.map(|m| {
-            serde_json::to_value(&m)
+        let muscle = params.0.primary_muscle_group.as_ref().and_then(|m| {
+            serde_json::to_value(m)
                 .ok()
                 .and_then(|v| v.as_str().map(str::to_string))
-                .unwrap_or_default()
         });
-        let mut matches = Vec::new();
-        let mut scanned = 0usize;
-        let mut page = 1u32;
-        loop {
-            let list = self
-                .client
-                .get_templates(page, 100)
-                .await
-                .map_err(|e| e.to_string())?;
-            scanned += list.exercise_templates.len();
-            let page_count = list.page_count;
-            let empty = list.exercise_templates.is_empty();
-            matches.extend(list.exercise_templates.into_iter().filter(|t| {
-                t.title.to_lowercase().contains(&needle)
-                    && muscle
-                        .as_ref()
-                        .map_or(true, |m| &t.primary_muscle_group == m)
-            }));
-            if page >= page_count as u32 || empty {
-                break;
-            }
-            page += 1;
-        }
+        let (matches, scanned) = self
+            .client
+            .search_templates(&params.0.query, muscle.as_deref())
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(Json(SearchTemplatesResponse {
             query: params.0.query,
             matches,
@@ -804,47 +736,11 @@ impl HevyTools {
         if params.0.limit == 0 {
             return Err("limit must be at least 1".to_string());
         }
-        let needle = params
-            .0
-            .query
-            .as_deref()
-            .map(str::to_lowercase)
-            .filter(|q| !q.trim().is_empty());
-        let mut routines = Vec::new();
-        let mut scanned = 0usize;
-        let mut page = 1u32;
-        'pages: loop {
-            let list = self
-                .client
-                .get_routines(page, 10)
-                .await
-                .map_err(|e| e.to_string())?;
-            scanned += list.routines.len();
-            let page_count = list.page_count;
-            let empty = list.routines.is_empty();
-            for r in list.routines {
-                if needle
-                    .as_ref()
-                    .map_or(true, |q| r.title.to_lowercase().contains(q))
-                {
-                    routines.push(RoutineSummary {
-                        id: r.id,
-                        title: r.title,
-                        folder_id: r.folder_id,
-                        updated_at: r.updated_at,
-                        exercise_count: r.exercises.len(),
-                        set_count: r.exercises.iter().map(|e| e.sets.len()).sum(),
-                    });
-                    if routines.len() >= params.0.limit as usize {
-                        break 'pages;
-                    }
-                }
-            }
-            if page >= page_count as u32 || empty {
-                break;
-            }
-            page += 1;
-        }
+        let (routines, scanned) = self
+            .client
+            .search_routines(params.0.query.as_deref(), params.0.limit as usize)
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(Json(SearchRoutinesResponse {
             query: params.0.query,
             routines,
@@ -1284,7 +1180,7 @@ mod tests {
         assert!(
             uw["required"]
                 .as_array()
-                .map_or(false, |r| r.contains(&serde_json::json!("is_private"))),
+                .is_some_and(|r| r.contains(&serde_json::json!("is_private"))),
             "update-workout.is_private must be required: {uw}"
         );
         // exercises must NOT be a direct property (that's replace's job)
