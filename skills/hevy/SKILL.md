@@ -80,6 +80,11 @@ hevy-cli webhooks create --url https://example.com/hevy --confirm
 hevy-cli webhooks delete --confirm
 ```
 
+Hevy stores kg. For lb users put `"weight_lb": 15` in set JSON (converted
+exactly; never hand-round kg, since 6.80 kg shows as 14.99 lb), and read back
+with `hevy-cli --lb ...`, which adds `weight_lb` next to each `weight_kg`.
+Verify every planned weight comes back as a clean lb value before reporting done.
+
 Measurement writes take `--date` plus `--input` JSON. For `create`, the input
 `date` must match `--date` (it is filled in when absent); explicit nulls are
 dropped with a warning because the API rejects them. For `update`, the CLI

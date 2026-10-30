@@ -17,6 +17,11 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = OutputFormat::Json, global = true)]
     output: OutputFormat,
 
+    /// Add a `weight_lb` field next to every `weight_kg` in the output.
+    /// Input JSON may likewise use `weight_lb` instead of `weight_kg`.
+    #[arg(long, global = true)]
+    lb: bool,
+
     /// Hevy API key. Defaults to HEVY_API_KEY.
     #[arg(long, env = "HEVY_API_KEY", hide_env_values = true, global = true)]
     hevy_api_key: Option<String>,
@@ -390,7 +395,10 @@ async fn run() -> Result<()> {
         .hevy_api_key
         .context("HEVY_API_KEY must be set or --hevy-api-key must be provided")?;
     let client = HevyClient::with_base_url(api_key, cli.hevy_base_url)?;
-    let value = dispatch(&client, cli.command).await?;
+    let mut value = dispatch(&client, cli.command).await?;
+    if cli.lb {
+        add_weight_lb(&mut value);
+    }
     print_json(&value, cli.output)?;
     Ok(())
 }
@@ -840,7 +848,100 @@ fn read_json_input(input: &str) -> Result<Value> {
             .with_context(|| format!("failed to read JSON input file {}", path.display()))?
     };
 
-    serde_json::from_str(&contents).context("failed to parse JSON input")
+    let mut value: Value = serde_json::from_str(&contents).context("failed to parse JSON input")?;
+    convert_weight_lb_inputs(&mut value)?;
+    Ok(value)
+}
+
+/// Exact pounds-to-kilograms factor (international avoirdupois pound).
+const KG_PER_LB: f64 = 0.453_592_37;
+
+/// Replace every `weight_lb` key in the input with an exact `weight_kg`
+/// (no rounding: Hevy stores kg, and rounding 15 lb to 6.80 kg shows as
+/// 14.99 lb). Giving both keys on one object is ambiguous, so it is an error.
+fn convert_weight_lb_inputs(value: &mut Value) -> Result<()> {
+    match value {
+        Value::Object(map) => {
+            if let Some(lb) = map.remove("weight_lb") {
+                if map.get("weight_kg").is_some_and(|kg| !kg.is_null()) {
+                    bail!("input has both weight_kg and weight_lb on the same object; use one");
+                }
+                let kg = match lb {
+                    Value::Null => Value::Null,
+                    Value::Number(n) => {
+                        let lb = n.as_f64().context("weight_lb is not a finite number")?;
+                        json!(lb * KG_PER_LB)
+                    }
+                    other => bail!("weight_lb must be a number or null, got {other}"),
+                };
+                map.insert("weight_kg".to_string(), kg);
+            }
+            for child in map.values_mut() {
+                convert_weight_lb_inputs(child)?;
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                convert_weight_lb_inputs(item)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Add `weight_lb` (rounded to 0.001 lb for display) beside each numeric
+/// `weight_kg`, so stored values can be read back in pounds.
+fn add_weight_lb(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            if let Some(kg) = map.get("weight_kg").and_then(Value::as_f64) {
+                map.insert(
+                    "weight_lb".to_string(),
+                    json!((kg / KG_PER_LB * 1000.0).round() / 1000.0),
+                );
+            }
+            for child in map.values_mut() {
+                add_weight_lb(child);
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(add_weight_lb),
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn weight_lb_converts_exactly_without_rounding() {
+        let mut input = json!({"routine": {"exercises": [{"sets": [
+            {"type": "normal", "weight_lb": 15, "reps": 10},
+            {"type": "normal", "weight_lb": null},
+        ]}]}});
+        convert_weight_lb_inputs(&mut input).unwrap();
+        let sets = &input["routine"]["exercises"][0]["sets"];
+        assert_eq!(sets[0]["weight_kg"], json!(15.0 * KG_PER_LB));
+        assert!(sets[0].get("weight_lb").is_none());
+        assert!(sets[1]["weight_kg"].is_null());
+    }
+
+    #[test]
+    fn weight_lb_and_kg_together_is_an_error() {
+        let mut input = json!({"weight_kg": 10.0, "weight_lb": 22.0});
+        assert!(convert_weight_lb_inputs(&mut input).is_err());
+        let mut input = json!({"weight_lb": "heavy"});
+        assert!(convert_weight_lb_inputs(&mut input).is_err());
+    }
+
+    #[test]
+    fn lb_output_round_trips_clean_values() {
+        let mut out = json!([{"sets": [{"weight_kg": 15.0 * KG_PER_LB}, {"weight_kg": 6.8}]}]);
+        add_weight_lb(&mut out);
+        assert_eq!(out[0]["sets"][0]["weight_lb"], json!(15.0));
+        assert_eq!(out[0]["sets"][1]["weight_lb"], json!(14.991));
+    }
 }
 
 fn to_value<T: Serialize, E: Into<anyhow::Error>>(

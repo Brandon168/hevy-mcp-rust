@@ -990,3 +990,65 @@ async fn test_cli_summary_aggregates_window() {
         .status
         .success());
 }
+
+#[tokio::test]
+async fn test_cli_weight_lb_input_and_output() {
+    let mock_server = MockServer::start().await;
+    // 15 lb must reach Hevy as an exact kg value, not a 2-decimal rounding.
+    let sent = json!({
+        "routine": {
+            "title": "Rehab",
+            "exercises": [{
+                "exercise_template_id": "e1",
+                "rest_seconds": 90,
+                "sets": [{"type": "normal", "weight_kg": 15.0 * 0.45359237, "reps": 10}]
+            }]
+        }
+    });
+    let stored = json!({
+        "id": "r9",
+        "title": "Rehab",
+        "folder_id": null,
+        "updated_at": "2026-04-20T09:00:00Z",
+        "created_at": "2026-04-20T08:00:00Z",
+        "exercises": [{
+            "index": 0,
+            "title": "Curl",
+            "notes": null,
+            "exercise_template_id": "e1",
+            "supersets_id": null,
+            "rest_seconds": 90,
+            "sets": [{"index": 0, "type": "normal", "weight_kg": 15.0 * 0.45359237, "reps": 10}]
+        }]
+    });
+    Mock::given(method("POST"))
+        .and(path("/v1/routines"))
+        .and(body_json(sent))
+        .respond_with(ResponseTemplate::new(200).set_body_json(stored))
+        .mount(&mock_server)
+        .await;
+
+    let input_path = std::env::temp_dir().join(format!("hevy-cli-lb-{}.json", std::process::id()));
+    std::fs::write(
+        &input_path,
+        r#"{"title": "Rehab", "exercises": [{"exercise_template_id": "e1", "rest_seconds": 90,
+            "sets": [{"type": "normal", "weight_lb": 15, "reps": 10}]}]}"#,
+    )
+    .unwrap();
+
+    let out = assert_json_success(run_cli(
+        &mock_server,
+        &[
+            "--lb",
+            "routines",
+            "create",
+            "--input",
+            input_path.to_str().unwrap(),
+            "--confirm",
+        ],
+    ));
+    let _ = std::fs::remove_file(input_path);
+    let exercise = &out["exercises"][0];
+    assert_eq!(exercise["rest_seconds"], 90);
+    assert_eq!(exercise["sets"][0]["weight_lb"], 15.0);
+}

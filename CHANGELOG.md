@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `hevy-cli`: input JSON may use `weight_lb` in place of `weight_kg`; it is
+  converted exactly (x 0.45359237, no rounding). Supplying both on one object
+  is an error.
+- `hevy-cli --lb` (global): adds `weight_lb` beside every `weight_kg` in output
+  for read-back verification.
+- `rest_seconds` on routine exercises is now accepted by the MCP routine tools
+  (`RoutineExerciseInput`) and shown in routine reads (`Exercise`). It was
+  previously dropped on the way in (MCP tools) and out (CLI/MCP reads).
+
 ## [0.2.0] - 2026-10-03
 
 ### Added

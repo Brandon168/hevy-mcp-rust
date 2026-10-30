@@ -163,6 +163,16 @@ hevy-cli summary --weeks 4
 hevy-cli webhooks delete --confirm
 ```
 
+Hevy stores kilograms. For pound-based work, input JSON may use `weight_lb`
+instead of `weight_kg` (converted exactly, never rounded), and the global `--lb`
+flag adds `weight_lb` beside every `weight_kg` in output, so you can read a
+write back and confirm clean values:
+
+```bash
+hevy-cli routines create --input routine.json --confirm   # sets use "weight_lb": 15
+hevy-cli --lb routines get --id <routine_id>
+```
+
 To install the local skill wrapper after building a release binary, pass the
 destination expected by your agent runtime:
 

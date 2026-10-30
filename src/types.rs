@@ -85,6 +85,9 @@ pub struct Exercise {
     pub notes: Option<String>,
     pub exercise_template_id: Option<String>,
     pub supersets_id: Option<i32>,
+    /// Routine exercises only; absent on workouts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rest_seconds: Option<i32>,
     #[serde(default)]
     pub sets: Vec<Set>,
 }
@@ -286,6 +289,9 @@ pub fn default_set_type() -> SetType {
 pub struct RoutineExerciseInput {
     pub exercise_template_id: String,
     pub superset_id: Option<i32>,
+    /// Rest timer in seconds after each set of this exercise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rest_seconds: Option<i32>,
     pub notes: Option<String>,
     pub sets: Vec<RoutineSetInput>,
 }
